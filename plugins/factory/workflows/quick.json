@@ -1,0 +1,53 @@
+{
+  "id": "quick",
+  "title": "Quick task",
+  "icon": "bolt",
+  "summary": "One specialist does a small, well-defined change; a code review and the approver gate it.",
+  "use_when": "Small, unambiguous changes: a query, a config tweak, a focused refactor, a doc fix.",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "build",
+      "kind": "build",
+      "title": "Build",
+      "agent": "$param.agent",
+      "mode": "quick"
+    },
+    {
+      "id": "review",
+      "kind": "panel",
+      "title": "Review",
+      "always": [
+        "code"
+      ],
+      "rules": [
+        {
+          "if": "ui",
+          "add": [
+            "ux",
+            "ui"
+          ]
+        }
+      ],
+      "loop_to": "build"
+    },
+    {
+      "id": "approve",
+      "kind": "approve",
+      "title": "Approve",
+      "agent": "approver",
+      "output": "decision.md",
+      "artifact": "decision"
+    },
+    {
+      "id": "merge",
+      "kind": "merge",
+      "title": "Merge"
+    }
+  ]
+}

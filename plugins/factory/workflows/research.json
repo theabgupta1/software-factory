@@ -1,0 +1,43 @@
+{
+  "id": "research",
+  "title": "Research",
+  "icon": "telescope",
+  "summary": "Investigate a technical question with sources and a recommendation; no code changes.",
+  "use_when": "Choosing a library or approach, understanding a system or standard, feasibility questions.",
+  "rework_to": "investigate",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": false
+    },
+    {
+      "id": "investigate",
+      "kind": "parallel",
+      "title": "Investigate",
+      "members": [
+        {
+          "key": "research",
+          "agent": "researcher",
+          "output": "research.md",
+          "artifact": "research"
+        },
+        {
+          "key": "context",
+          "agent": "codebase-analyst",
+          "output": "context.md",
+          "artifact": "context",
+          "when": {
+            "param_true": "repo"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deliver",
+      "kind": "deliver",
+      "title": "Deliver"
+    }
+  ]
+}

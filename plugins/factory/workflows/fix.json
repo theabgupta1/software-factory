@@ -1,0 +1,68 @@
+{
+  "id": "fix",
+  "title": "Bug fix",
+  "icon": "bug",
+  "summary": "Reproduce, diagnose the root cause, fix with a regression test, review and merge.",
+  "use_when": "A defect, failing test, production incident or regression.",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "diagnose",
+      "kind": "agent",
+      "title": "Diagnose",
+      "agent": "debugger",
+      "output": "diagnosis.md",
+      "artifact": "diagnosis"
+    },
+    {
+      "id": "build",
+      "kind": "build",
+      "title": "Build",
+      "agent": "builder",
+      "mode": "fix"
+    },
+    {
+      "id": "review",
+      "kind": "panel",
+      "title": "Review",
+      "always": [
+        "code",
+        "security"
+      ],
+      "rules": [
+        {
+          "if": "ui",
+          "add": [
+            "ux",
+            "ui"
+          ]
+        },
+        {
+          "if": "perf",
+          "add": [
+            "performance"
+          ]
+        }
+      ],
+      "loop_to": "build"
+    },
+    {
+      "id": "approve",
+      "kind": "approve",
+      "title": "Approve",
+      "agent": "approver",
+      "output": "decision.md",
+      "artifact": "decision"
+    },
+    {
+      "id": "merge",
+      "kind": "merge",
+      "title": "Merge"
+    }
+  ]
+}

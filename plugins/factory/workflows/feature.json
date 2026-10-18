@@ -1,0 +1,101 @@
+{
+  "id": "feature",
+  "title": "Feature",
+  "icon": "spark",
+  "summary": "Specify, (plan,) build, review and merge a change to the codebase.",
+  "use_when": "Adding or changing product behaviour, APIs or full-stack features.",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "spec",
+      "kind": "agent",
+      "title": "Specify",
+      "agent": "product-analyst",
+      "output": "spec.md",
+      "artifact": "spec"
+    },
+    {
+      "id": "plan",
+      "kind": "agent",
+      "title": "Plan",
+      "agent": "architect",
+      "mode": "plan",
+      "output": "design.md",
+      "artifact": "design",
+      "plan_json": true,
+      "when": {
+        "size_in": [
+          "M",
+          "L"
+        ]
+      }
+    },
+    {
+      "id": "plan-approval",
+      "kind": "gate",
+      "title": "Plan approval",
+      "when": {
+        "any": [
+          {
+            "size_in": [
+              "L"
+            ]
+          },
+          {
+            "policy": "require_plan_approval"
+          }
+        ]
+      },
+      "reason": "The plan is ready for your review before any code is written."
+    },
+    {
+      "id": "build",
+      "kind": "build",
+      "title": "Build",
+      "agent": "builder"
+    },
+    {
+      "id": "review",
+      "kind": "panel",
+      "title": "Review",
+      "always": [
+        "code",
+        "security"
+      ],
+      "rules": [
+        {
+          "if": "ui",
+          "add": [
+            "ux",
+            "ui"
+          ]
+        },
+        {
+          "if": "perf",
+          "add": [
+            "performance"
+          ]
+        }
+      ],
+      "loop_to": "build"
+    },
+    {
+      "id": "approve",
+      "kind": "approve",
+      "title": "Approve",
+      "agent": "approver",
+      "output": "decision.md",
+      "artifact": "decision"
+    },
+    {
+      "id": "merge",
+      "kind": "merge",
+      "title": "Merge"
+    }
+  ]
+}
