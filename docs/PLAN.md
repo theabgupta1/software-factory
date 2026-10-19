@@ -75,7 +75,9 @@ Written by the console (`POST /api/jobs/:id/messages`), by `/factory tell <job> 
 Delivery, in order of preference, always recorded with how and when:
 1. **Running subagent** — a `PostToolUse` hook fires inside the agent after its next tool call, finds pending
    messages for its step (agent id ↔ step mapping comes from the `PostToolUse(Agent)` spawn record) and
-   returns them as `additionalContext`; the mod can also push them with `$.session.send({to:{agentId}})`.
+   returns them as `additionalContext`. The mod writes messages through `factoryctl tell` like the console
+   and leaves delivery to this hook: a second path (`$.session.send`) would reach the agent at the same
+   moment (its next turn boundary) and risk delivering a message twice.
 2. **Agent not running** — the message is folded into the next prompt `factoryctl next` issues for that role
    (next round, rework, resume) and marked delivered-by-prompt.
 3. **Orchestrator** — returned in the `notes` of the next `next`/`done` response; the Stop hook surfaces it too.
@@ -121,9 +123,14 @@ live activity from transcripts, chat to any agent —, Orchestration DAG, Timeli
 **Catalog** (agents with avatars and contracts, workflows as graphs) · **Settings & integrations**. Light/dark,
 keyboard-first, WCAG AA, responsive.
 
-factory-live mod: status-line entry, above-prompt band only when something needs you (Approve / Rework / Open
-buttons), live pane with jobs and agents (Watch → jump into an agent's transcript), notifications on state
-changes, `/factory-board`, message delivery to running agents; experimental autopilot last.
+factory-live mod (built): status line, above-prompt band only when something needs you (put the next command
+in the prompt, open the board, hide until something else needs you), `/factory-board` pane with jobs and
+the agents at work — each a pixel robot in its own hue (a `Raster` on the terminal, an SVG on desktop and
+VS Code) — Watch (opens the agent's transcript), Message (→ `factoryctl tell`), notifications when a job
+starts needing you, and `/factory-console` (starts the web console). It reads `.factory/index.json` and
+`agents.json`, never decides anything, and never starts agents. Autopilot (the mod executing `next`
+actions with `$.agent.spawn`) was cut: it would put a second executor beside the skill for little gain
+while the API is early access; `factoryctl next/done` keeps the door open.
 
 ## 8. Testing and verification
 
