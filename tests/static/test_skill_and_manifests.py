@@ -95,10 +95,17 @@ class Manifests(unittest.TestCase):
             self.assertNotIn("innerHTML = `", js.read_text(), f"{js.name}: build DOM with h(), not template HTML")
 
     def test_no_secrets_or_machine_paths_committed(self):
-        pattern = re.compile(r"(sk-ant-[A-Za-z0-9]{10,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|/Users/[a-z]+/|BEGIN (RSA|OPENSSH) PRIVATE KEY)")
-        for path in PLUGIN.rglob("*"):
-            if path.is_file() and path.suffix in (".py", ".js", ".json", ".md", ".css", ".html"):
-                hits = pattern.findall(path.read_text(errors="ignore"))
+        # Fixtures that need a secret-shaped value assemble it at run time, so scanners never see one here.
+        pattern = re.compile(r"(sk-ant-[A-Za-z0-9]{10,}|[sr]k_live_[0-9A-Za-z]{10,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}"
+                             r"|xox[bp]-[0-9A-Za-z-]{10,}|/Users/[a-z]+/|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)")
+        roots = [ROOT / "plugins", ROOT / "scripts", ROOT / "tests", ROOT / "docs"]
+        for root in roots:
+            for path in root.rglob("*"):
+                if not path.is_file() or "node_modules" in path.parts or "__pycache__" in path.parts:
+                    continue
+                if path.suffix in (".png", ".jpg", ".zip", ".gz", ".pyc"):
+                    continue
+                hits = [h[0] if isinstance(h, tuple) else h for h in pattern.findall(path.read_text(errors="ignore"))]
                 self.assertFalse(hits, f"{path}: {hits[:2]}")
 
 

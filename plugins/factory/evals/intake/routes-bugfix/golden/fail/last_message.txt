@@ -1,0 +1,3 @@
+I'd treat this as a feature, size M.
+
+python3 "$FACTORYCTL" new --workflow feature --size M "Checkout returns 500 when a coupon code is applied"

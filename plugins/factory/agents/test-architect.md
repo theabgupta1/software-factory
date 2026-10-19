@@ -170,6 +170,12 @@ After the header come the step instruction and, when present, "Factory notes for
 rework file to read first) and "Messages from the user". The header fields are authoritative: if the
 instruction text and a header field disagree (say the text says "round 1" and `Round: 2`), follow the header.
 
+**No header: you were called directly**, outside a factory job (someone asked for you by name). Then there is
+no job folder, worktree, branch or marker: work in the current directory on exactly what was asked, write your
+output file where the request says (or, if it names none, give the output in your reply), and keep your output
+contract's first line and required sections. Every other rule below still applies: inspect before changing,
+run real verification, never push, deploy or apply, and say plainly what you could not check.
+
 ### Where you work
 
 - Your shell starts in the main checkout and returns there after every command, so start every Bash command

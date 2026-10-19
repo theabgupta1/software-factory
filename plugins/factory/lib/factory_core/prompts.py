@@ -73,23 +73,24 @@ def instruction(kind: str, *, job: dict, stage: dict, mode: str | None, round_no
             intro = "Audit the existing codebase from your angle (no code changes)."
         return f"{intro}\n\nRequest (verbatim):\n{_quote(request)}"
     if kind == "build":
+        n = round_no or 1
         lines = {
-            "implement": "Build round 1. Implement spec.md (and design.md if it exists). Write build.md.",
+            "implement": f"Build round {n}. Implement spec.md (and design.md if it exists). Write build.md.",
             "integrate": (
-                "Integrate round 1. The plan's tasks are committed on the branch; their reports are in tasks/. "
+                f"Integrate round {n}. The plan's tasks are committed on the branch; their reports are in tasks/. "
                 "Run the full validation, fix integration problems, and write build.md covering every "
                 "acceptance criterion."
             ),
-            "fix": "Build round 1. Fix the defect described in diagnosis.md, add a regression test that fails "
+            "fix": f"Build round {n}. Fix the defect described in diagnosis.md, add a regression test that fails "
                    "before the fix and passes after it, and write build.md.",
-            "quick": "Build round 1. Make the change the request asks for, verify it, and write build.md.",
-            "infra": "Build round 1. Implement infra-design.md as code. Run format, validate, lint and plan only — "
+            "quick": f"Build round {n}. Make the change the request asks for, verify it, and write build.md.",
+            "infra": f"Build round {n}. Implement infra-design.md as code. Run format, validate, lint and plan only — "
                      "never apply, deploy or touch live resources. Write build.md with the plan output summary.",
-            "refactor": "Build round 1. Refactor per design.md without changing behaviour; the characterisation "
+            "refactor": f"Build round {n}. Refactor per design.md without changing behaviour; the characterisation "
                         "tests from test-report.md must still pass. Write build.md.",
-            "perf": "Build round 1. Optimise the bottleneck identified in perf-report.md, keep behaviour identical, "
+            "perf": f"Build round {n}. Optimise the bottleneck identified in perf-report.md, keep behaviour identical, "
                     "re-run the benchmark, and write build.md with before/after numbers.",
-            "docs": "Build round 1. Write or update the documentation the request asks for, verify every command "
+            "docs": f"Build round {n}. Write or update the documentation the request asks for, verify every command "
                     "and path against the code, and write build.md.",
         }
         text = lines.get(mode or "implement", lines["implement"])

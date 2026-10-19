@@ -30,8 +30,10 @@ export function verdictChips(reviews) {
   const entries = Object.entries(reviews || {});
   if (!entries.length) return null;
   return h("span", { class: "verdicts", "aria-label": "Review verdicts" },
-    entries.map(([k, v]) => h("span", { class: ["vchip", v || "pending", v === "pending" ? "pulse" : ""], title: `${k}: ${v}` },
-      v === "PASS" ? "✓" : v === "CHANGES" ? "!" : "…", " ", k)));
+    // Only the status mark pulses: fading the whole chip would take its text below AA contrast mid-cycle.
+    entries.map(([k, v]) => h("span", { class: ["vchip", v || "pending"], title: `${k}: ${v}` },
+      h("span", { class: (v || "pending") === "pending" ? "pulse" : "", "aria-hidden": "true" }, v === "PASS" ? "✓" : v === "CHANGES" ? "!" : "…"),
+      " ", k)));
 }
 
 const WORKFLOW_ICON = { feature: "spark", fix: "bug", quick: "bolt", research: "telescope", review: "scan", data: "database",

@@ -1,0 +1,5 @@
+Workflow **fix**, size **S**: a reproducible bug with a clear symptom; the debugger diagnoses it first, then a fix with a regression test.
+
+```bash
+python3 "$FACTORYCTL" new --workflow fix --size S --why "reproducible 500 on coupon checkout" "Checkout returns 500 when a coupon code is applied"
+```

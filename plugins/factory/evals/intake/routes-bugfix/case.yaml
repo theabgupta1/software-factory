@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: intake-routes-bugfix
+description: The /factory skill picks the fix workflow and a small size for a reproducible bug, and states the exact command.
+tags: [intake, cheap]
