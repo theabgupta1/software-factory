@@ -137,7 +137,7 @@ function nodeEl(n, x, y, ctx, detail) {
   const title = n.label || meta?.title || n.agent || n.id;
   const sub = n.ghost ? n.sub : `${shortStep(n.id)} · ${n.sub}`;
   const g = s("g", { class: ["flow-node", n.state].join(" "), transform: `translate(${x} ${y})`, tabindex: "0", role: "button",
-    "aria-label": `${title}, ${stepLabel(n.id)}: ${n.state}` });
+    "aria-label": `${title}, ${stepLabel(n.id)}: ${n.state}`, "data-focus-key": `flow:${n.id}` });
   g.appendChild(s("rect", { class: "box", width: COL_W, height: NODE_H, rx: 12 }));
   if (meta) {
     g.appendChild(avatarSvg(meta, { mood: n.ghost ? "asleep" : moodFor(n.step), x: 10, y: 12, size: 32 }));

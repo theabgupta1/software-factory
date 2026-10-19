@@ -49,7 +49,7 @@ function agents(cat, filter, ctx) {
     return h("section", { class: "stack", "aria-labelledby": `dom-${d.id}` },
       h("div", { class: "domain-head" }, h("span", { class: "domain-swatch", style: { background: `hsl(${d.hue} 80% 58%)` } }),
         h("h2", { class: "h3", id: `dom-${d.id}` }, d.title), h("span", { class: "faint small" }, String(list.length))),
-      h("div", { class: "grid-cards" }, list.map((a) => h("button", { class: "catalog-card", type: "button",
+      h("div", { class: "grid-cards" }, list.map((a) => h("button", { class: "catalog-card", type: "button", "data-focus-key": `catalog:${a.name}`,
         onclick: () => ctx.go(`#/catalog/${a.name}`) },
         h("div", { class: "row" }, avatar(a, { size: "lg", mood: "idle" }),
           h("div", { class: "truncate" }, h("div", { style: { fontWeight: 650 } }, a.title), h("div", { class: "mono xs faint" }, a.name))),

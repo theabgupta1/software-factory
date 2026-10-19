@@ -24,10 +24,11 @@ export function renderTimeline(root, ctx, detail) {
   for (let t = 0; t <= span; t += tickStep) ticks.push(t);
 
   const gantt = rows.length && start ? h("div", { class: "gantt", role: "table", "aria-label": "Agent timeline" },
-    h("div", { class: "gantt-label xs faint", role: "columnheader", style: { borderTop: 0 } }, "Agent · step"),
-    h("div", { class: "gantt-axis", role: "columnheader" }, ticks.map((t) => h("div", { class: "gantt-tick", style: { left: `${(t / span) * 100}%` } },
-      h("span", {}, t === 0 ? clock(detail.job.created_at) : `+${duration(t)}`)))),
-    rows.flatMap((r) => {
+    h("div", { class: "gantt-row", role: "row" },
+      h("div", { class: "gantt-label xs faint", role: "columnheader", style: { borderTop: 0 } }, "Agent · step"),
+      h("div", { class: "gantt-axis", role: "columnheader" }, ticks.map((t) => h("div", { class: "gantt-tick", style: { left: `${(t / span) * 100}%` } },
+        h("span", {}, t === 0 ? clock(detail.job.created_at) : `+${duration(t)}`))))),
+    rows.map((r) => {
       const meta = ctx.agentMeta(r.agent);
       const cls = r.status === "issued" ? "running" : r.value === "CHANGES" || r.value === "PARTIAL" ? "changes"
         : r.status === "invalid" || r.value === "BLOCKED" ? "blocked" : r.status === "done" ? "pass" : "neutral";
@@ -39,11 +40,10 @@ export function renderTimeline(root, ctx, detail) {
         h("span", {}, `${duration(r.seconds)}${r.usage?.total ? ` · ${tokens(r.usage.total)}` : ""}`));
       bar.style.left = left;
       bar.style.width = `calc(${right} - ${left})`;
-      return [
+      return h("div", { class: "gantt-row", role: "row" },
         h("div", { class: "gantt-label", role: "cell" }, avatar(meta, { size: "xs", step: r, model: false }),
           h("span", { class: "truncate" }, h("strong", {}, meta.title || r.agent), h("span", { class: "faint" }, ` · ${stepLabel(r.step)}`))),
-        h("div", { class: "gantt-track", role: "cell" }, h("div", { class: "gantt-grid" }, ticks.map((t) => h("div", { class: "gantt-tick", style: { left: `${(t / span) * 100}%` } }))), bar),
-      ];
+        h("div", { class: "gantt-track", role: "cell" }, h("div", { class: "gantt-grid" }, ticks.map((t) => h("div", { class: "gantt-tick", style: { left: `${(t / span) * 100}%` } }))), bar));
     })) : empty("bars", "Nothing on the timeline yet", detail.legacy ? "v1 jobs did not record timestamps." : "Agent runs appear here as they start.");
 
   const types = [...new Set((detail.events || []).map((e) => e.type))].sort();

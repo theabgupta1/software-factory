@@ -1,12 +1,13 @@
 // Console API client: ETag-aware polling, a per-run write token, and project selection.
 
-const TOKEN = document.querySelector('meta[name="factory-token"]')?.content || "";
-export const MODE = document.querySelector('meta[name="factory-mode"]')?.content || "live";
+const DOC = typeof document === "undefined" ? null : document;  // null when imported by Node unit tests
+const TOKEN = DOC?.querySelector('meta[name="factory-token"]')?.content || "";
+export const MODE = DOC?.querySelector('meta[name="factory-mode"]')?.content || "live";
 
 const etags = new Map();
 const cache = new Map();
 let project = null;
-try { project = localStorage.getItem("factory.project") || null; } catch { /* storage unavailable */ }
+try { project = globalThis.localStorage?.getItem("factory.project") || null; } catch { /* storage unavailable */ }
 
 export function setProject(path) {
   project = path || null;

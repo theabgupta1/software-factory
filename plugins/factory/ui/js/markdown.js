@@ -42,8 +42,9 @@ export function markdown(src, { skipHeader = false } = {}) {
     if (/^\s*(---|\*\*\*)\s*$/.test(line)) { out += "<hr>"; i++; continue; }
     const hm = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
     if (hm) {
-      const n = Math.min(hm[1].length, 4);
-      out += `<h${n}>${inline(hm[2])}</h${n}>`;
+      // The page owns the h1; document headings start one level down and keep their visual size via h-N.
+      const n = Math.min(hm[1].length, 5);
+      out += `<h${n + 1} class="h-${n}">${inline(hm[2])}</h${n + 1}>`;
       i++;
       continue;
     }

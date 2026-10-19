@@ -4,12 +4,13 @@ import { icon } from "./icons.js";
 import { factoryMark, avatar } from "./avatars.js";
 import { ApiError, MODE, currentProject, get, poll, setProject } from "./api.js";
 import { ago } from "./format.js";
-import { closeDrawer, drawerIsOpen, errorBox, skeleton, statusPill, empty } from "./components.js";
+import { closeDrawer, drawerIsOpen, errorBox, keepFocus, skeleton, statusPill, empty } from "./components.js";
 import { renderHome } from "./views/home.js";
 import { renderJob, TABS } from "./views/job.js";
 import { agentDrawerStep, updateAgentDrawer } from "./views/crew.js";
 import { renderCatalog } from "./views/catalog.js";
 import { renderSettings } from "./views/settings.js";
+import { parseRoute } from "./route.js";
 
 const app = {
   state: null,
@@ -25,17 +26,6 @@ const app = {
 };
 
 // ---------- routing ----------
-export function parseRoute(hash) {
-  const raw = (hash || "").replace(/^#/, "") || "/";
-  const [path, query = ""] = raw.split("?");
-  const params = Object.fromEntries(new URLSearchParams(query));
-  const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
-  if (parts[0] === "jobs" && parts[1]) return { name: "job", id: parts[1], tab: parts[2] || "overview", params };
-  if (parts[0] === "catalog") return { name: "catalog", agent: parts[1] || null, params };
-  if (parts[0] === "settings") return { name: "settings", params };
-  return { name: "home", params };
-}
-
 let quietNav = false;
 function go(hash, { replace = false, quiet = false } = {}) {
   if (location.hash === hash) return;
@@ -135,6 +125,10 @@ function renderBanner() {
 
 // ---------- views ----------
 function render() {
+  keepFocus(els.content, renderView);
+}
+
+function renderView() {
   const r = app.route;
   renderSidebar();
   renderCrumbs();

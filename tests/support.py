@@ -20,6 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "factory"
 sys.path.insert(0, str(PLUGIN / "lib"))
 
+# Tests never touch the real ~/.claude: the projects registry and anything else keyed on the Claude home
+# goes to a throwaway directory that subprocesses (factoryctl, hooks) inherit too.
+os.environ["CLAUDE_CONFIG_DIR"] = tempfile.mkdtemp(prefix="factory-test-claude-home-")
+
 from factory_core import prompts  # noqa: E402
 from factory_core.engine import Engine  # noqa: E402
 from factory_core.paths import RepoPaths  # noqa: E402

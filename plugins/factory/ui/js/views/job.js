@@ -27,6 +27,8 @@ const NEED_LABEL = { escalate: "The approver escalated this job", "plan-approval
   policy: "A human must approve this by policy", integrity: "The worktree changed during review",
   "approve-merge": "Approved and waiting for you to merge" };
 
+let focusTab = null;
+
 export function renderJob(root, ctx, detail, route) {
   const { job } = detail;
   const tabId = TABS.some((t) => t.id === route.tab) ? route.tab : "overview";
@@ -40,13 +42,15 @@ export function renderJob(root, ctx, detail, route) {
     nextAction(detail, ctx, crewRunning),
     h("div", { class: "stack" },
       tabs(TABS.map((t) => ({ ...t, count: counts[t.id] || null })), tabId,
-        (id, focus) => { ctx.go(`#/jobs/${job.id}/${id}`); if (focus) requestAnimationFrame(() => document.getElementById(`job-tab-${id}`)?.focus()); },
+        (id, focus) => { if (focus) focusTab = id; ctx.go(`#/jobs/${job.id}/${id}`); },
         "job"),
       panel)));
 
   const render = { overview: renderOverview, crew: renderCrew, flow: renderFlow, timeline: renderTimeline,
     artifacts: renderArtifacts, changes: renderChanges, quality: renderQuality }[tabId];
   render(panel, ctx, detail, route);
+  // Arrow keys switch tabs through the router, which re-renders; keep keyboard focus on the newly selected tab.
+  if (focusTab === tabId) { focusTab = null; document.getElementById(`job-tab-${tabId}`)?.focus(); }
   if (route.params?.step && tabId === "crew") {
     const entry = detail.crew.find((c) => c.step === route.params.step);
     if (entry && !ctx.agentDrawerFor(entry.step)) openAgent(ctx, detail, entry);

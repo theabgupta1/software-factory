@@ -125,9 +125,23 @@ export function tabs(items, active, onSelect, idPrefix) {
 
 // Drawer (modal dialog) with focus trap and focus return.
 let drawerState = null;
+// Opening a drawer often changes the route first, which re-renders the opener away; remember what the user
+// last pointed at or focused so focus can return to its re-rendered twin.
+let lastIntentKey = null;
+if (typeof document !== "undefined") {
+  const remember = (e) => { lastIntentKey = e.target?.closest?.("[data-focus-key]")?.dataset.focusKey || null; };
+  document.addEventListener("pointerdown", remember, true);
+  document.addEventListener("focusin", (e) => { if (!e.target?.closest?.(".drawer")) remember(e); }, true);
+}
+
 export function openDrawer(build, { label = "Details", onClose } = {}) {
-  closeDrawer(true);
-  const previous = document.activeElement;
+  // Replacing an open drawer (e.g. back/forward between agents) keeps the original opener for focus return.
+  const active = document.activeElement;
+  const previous = drawerState ? drawerState.previous : {
+    el: active && active !== document.body && active.id !== "main" ? active : null,
+    key: active?.dataset?.focusKey || lastIntentKey,
+  };
+  closeDrawer(true, true);
   const scrim = h("div", { class: "scrim", onclick: () => closeDrawer() });
   const panel = h("aside", { class: "drawer", role: "dialog", "aria-modal": "true", "aria-label": label, tabindex: "-1" });
   const host = h("div", { class: "drawer-host" }, scrim, panel);
@@ -152,16 +166,40 @@ export function openDrawer(build, { label = "Details", onClose } = {}) {
   return panel;
 }
 
-export function closeDrawer(immediate = false) {
+export function closeDrawer(immediate = false, replaced = false) {
   if (!drawerState) return;
   const { host, previous, onKey, onClose } = drawerState;
   drawerState = null;
   document.removeEventListener("keydown", onKey, true);
-  document.body.classList.remove("drawer-open");
+  if (!replaced) document.body.classList.remove("drawer-open");
   const done = () => host.remove();
   if (immediate) done(); else setTimeout(done, 240);
-  if (onClose) onClose();
-  if (previous && previous.focus) previous.focus();
+  if (onClose) onClose({ replaced });
+  if (!replaced) returnFocus(previous);
+}
+
+// Live polling re-renders views, so the element that opened a drawer may have been replaced by an identical one.
+// Elements that open drawers carry data-focus-key; focus goes back to the current element with the same key.
+function returnFocus({ el, key } = {}) {
+  let target = el && el.isConnected ? el : null;
+  if (!target && key) target = document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`);
+  target = target || document.getElementById("main");
+  if (target && target.focus) target.focus({ preventScroll: target !== el });
+}
+
+// Re-render without losing keyboard focus: after `fn` replaces the DOM, focus the twin of the element that had it
+// (same data-focus-key, id, or link target).
+export function keepFocus(container, fn) {
+  const a = document.activeElement;
+  let selector = null;
+  if (a && a !== container && container.contains(a)) {
+    if (a.dataset?.focusKey) selector = `[data-focus-key="${CSS.escape(a.dataset.focusKey)}"]`;
+    else if (a.id) selector = `#${CSS.escape(a.id)}`;
+    else if (a.tagName === "A" && a.getAttribute("href")) selector = `a[href="${CSS.escape(a.getAttribute("href"))}"]`;
+  }
+  fn();
+  const lost = !document.activeElement || document.activeElement === document.body || document.activeElement === container;
+  if (selector && !a.isConnected && lost) container.querySelector(selector)?.focus({ preventScroll: true });
 }
 
 export function drawerIsOpen() { return Boolean(drawerState); }

@@ -21,6 +21,9 @@ export function commandFor({ text, workflow, size, agent }) {
   return parts.join(" ");
 }
 
+let composerEl = null;
+let composerFor = null;
+
 export function renderHome(root, ctx) {
   const state = ctx.state;
   const view = h("div", { class: "stack-lg" });
@@ -72,7 +75,13 @@ export function renderHome(root, ctx) {
   grid.appendChild(h("div", { class: "stack-lg" },
     jobsCard("Active", running.concat(jobs.filter((j) => j.attention)), "No active jobs. Start one from the composer.", ctx),
     jobsCard("Finished", finished, "Finished jobs will appear here.", ctx)));
-  grid.appendChild(h("div", { class: "stack-lg" }, composer(ctx), backlogCard(state, ctx)));
+  // The composer survives re-renders (live polling) so typing, focus and caret are never lost.
+  if (!composerEl || composerFor !== state.repo?.root) {
+    composerEl = composer(ctx);
+    composerFor = state.repo?.root;
+  }
+  composerEl.refresh();
+  grid.appendChild(h("div", { class: "stack-lg" }, composerEl, backlogCard(state, ctx)));
   view.appendChild(grid);
 
   if (!jobs.length) {
@@ -154,8 +163,15 @@ function composer(ctx) {
     agentField.hidden = state.workflow !== "quick";
     save();
   };
-  const implementers = ctx.catalog?.agents?.filter((a) => ["build", "data", "infra", "quality"].includes(a.domain) &&
-    (a.tools || []).includes("Edit")) || [];
+  // The catalog can arrive after the composer is built (it is kept across re-renders), so the specialist list
+  // fills itself in on the first render that has it.
+  const agentSelect = h("select", { class: "select", id: "task-agent", onchange: (e) => { state.agent = e.target.value; update(); } });
+  const fillAgents = () => {
+    if (agentSelect.options.length || !ctx.catalog?.agents) return;
+    const implementers = ctx.catalog.agents.filter((a) => ["build", "data", "infra", "quality"].includes(a.domain) &&
+      (a.tools || []).includes("Edit"));
+    mount(agentSelect, implementers.map((a) => h("option", { value: a.name, selected: a.name === state.agent }, a.title)));
+  };
   const textarea = h("textarea", { class: "textarea", id: "task-text", rows: 4, placeholder: "e.g. Rate limit the signup form to 5 attempts per IP per 10 minutes",
     oninput: (e) => { state.text = e.target.value; update(); } });
   textarea.value = state.text;
@@ -163,9 +179,8 @@ function composer(ctx) {
     WORKFLOWS.map(([v, l]) => h("option", { value: v, selected: v === state.workflow }, l)));
   const sizeSelect = h("select", { class: "select", id: "task-size", onchange: (e) => { state.size = e.target.value; update(); } },
     [["auto", "Auto"], ["S", "Small"], ["M", "Medium"], ["L", "Large (plan approval)"]].map(([v, l]) => h("option", { value: v, selected: v === state.size }, l)));
-  mount(agentField, h("label", { for: "task-agent" }, "Specialist"),
-    h("select", { class: "select", id: "task-agent", onchange: (e) => { state.agent = e.target.value; update(); } },
-      implementers.map((a) => h("option", { value: a.name, selected: a.name === state.agent }, a.title))));
+  mount(agentField, h("label", { for: "task-agent" }, "Specialist"), agentSelect);
+  fillAgents();
   const addBtn = h("button", { class: "btn", type: "button", onclick: async () => {
     if (!state.text.trim()) { toast("Describe the task first", "error"); textarea.focus(); return; }
     addBtn.disabled = true;
@@ -178,7 +193,7 @@ function composer(ctx) {
     addBtn.disabled = false;
   } }, icon("inbox"), "Add to backlog");
   update();
-  return h("section", { class: "card", id: "new-task", "aria-labelledby": "composer-h" },
+  const el = h("section", { class: "card", id: "new-task", "aria-labelledby": "composer-h" },
     h("div", { class: "card-head" }, h("h2", { class: "h3", id: "composer-h" }, "New task"),
       h("span", { class: "faint xs" }, "Runs in Claude Code")),
     h("div", { class: "card-body stack" },
@@ -192,6 +207,8 @@ function composer(ctx) {
       h("div", { class: "row" },
         h("button", { class: "btn btn-primary", type: "button", onclick: () => copyText(commandFor(state)) }, icon("copy"), "Copy command"),
         addBtn)));
+  el.refresh = fillAgents;
+  return el;
 }
 
 function backlogCard(state, ctx) {

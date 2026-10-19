@@ -19,7 +19,7 @@ export function renderCrew(root, ctx, detail) {
       h("p", { class: "small muted", style: { margin: 0 } },
         crew.length ? `${crew.length} agent ${crew.length === 1 ? "run" : "runs"} so far. Select an agent to follow its work or send it an instruction.`
           : "No agent has started yet."),
-      detail.legacy ? null : h("button", { class: "btn btn-sm", type: "button", onclick: () => openOrchestrator(ctx, detail) },
+      detail.legacy ? null : h("button", { class: "btn btn-sm", type: "button", "data-focus-key": "orchestrator", onclick: () => openOrchestrator(ctx, detail) },
         icon("message"), "Message the orchestrator", orchestratorMsgs.length ? h("span", { class: "count" }, String(orchestratorMsgs.length)) : null)),
     crew.length ? h("div", { class: "crew-grid" }, crew.map((c) => agentCard(c, ctx, detail))) : null,
     upcoming.length ? h("section", { class: "stack" },
@@ -32,7 +32,7 @@ function agentCard(c, ctx, detail) {
   const meta = ctx.agentMeta(c.agent);
   const queued = c.messages.filter((m) => m.status === "queued").length;
   const delivered = c.messages.filter((m) => m.status === "delivered").length;
-  return h("button", { class: ["agent-card", c.status === "issued" ? "is-running" : ""], type: "button",
+  return h("button", { class: ["agent-card", c.status === "issued" ? "is-running" : ""], type: "button", "data-focus-key": `agent:${c.step}`,
     "aria-label": `${c.title}, ${stepLabel(c.step)}, ${c.status === "issued" ? "working" : c.value || c.status}`,
     onclick: () => { ctx.go(`#/jobs/${detail.job.id}/crew?step=${encodeURIComponent(c.step)}`, { replace: true }); openAgent(ctx, detail, c); } },
     h("div", { class: "row between" },
@@ -69,7 +69,7 @@ function upcomingAgents(detail, ctx) {
 
 function upcomingCard(u, ctx) {
   const meta = ctx.agentMeta(u.agent);
-  return h("button", { class: "agent-card", type: "button", style: { opacity: 0.78 }, onclick: () => ctx.go(`#/catalog/${u.agent}`) },
+  return h("button", { class: "agent-card upcoming", type: "button", onclick: () => ctx.go(`#/catalog/${u.agent}`) },
     h("div", { class: "who" }, avatar(meta, { size: "lg", mood: "asleep" }),
       h("div", { class: "truncate" }, h("div", { class: "name" }, meta.title), h("div", { class: "step" }, `${u.stage.title} · upcoming`))),
     h("div", { class: "why" }, meta.summary || ""));
@@ -88,10 +88,11 @@ export function openAgent(ctx, detail, entry) {
   const headPill = h("span", {});
   const facts = h("div", { class: "row-wrap xs faint" });
   const foot = h("div", { class: "drawer-foot" });
-  current = { step: entry.step, update: null };
+  const mine = { step: entry.step, update: null };
+  current = mine;
 
   function render() {
-    const e = current.entry || entry;
+    const e = mine.entry || entry;
     mount(headPill, stepPill(e));
     mount(facts,
       h("span", { class: "chip" }, icon("spark"), e.model || meta.model || "model"),
@@ -104,7 +105,7 @@ export function openAgent(ctx, detail, entry) {
   }
 
   function renderBody() {
-    const e = current.entry || entry;
+    const e = mine.entry || entry;
     if (view === "output") return renderOutput(body, detail, e);
     if (view === "contract") {
       const agentInfo = (ctx.catalog?.agents || []).find((a) => a.name === e.agent);
@@ -128,7 +129,7 @@ export function openAgent(ctx, detail, entry) {
   const sendBtn = h("button", { class: "btn btn-primary", type: "button", onclick: () => send() }, icon("send"), "Send");
   async function send() {
     const text = textarea.value.trim();
-    const e = current.entry || entry;
+    const e = mine.entry || entry;
     if (!text) { textarea.focus(); return; }
     sendBtn.disabled = true;
     try {
@@ -160,16 +161,16 @@ export function openAgent(ctx, detail, entry) {
       h("div", { class: "delivery-note", id: "delivery-note" }, icon("info"), deliveryNote(entry))));
     render();
     renderBody();
-  }, { label: `${entry.title} — ${stepLabel(entry.step)}`, onClose: () => {
+  }, { label: `${entry.title} — ${stepLabel(entry.step)}`, onClose: ({ replaced } = {}) => {
     if (stopPoll) stopPoll();
-    current = null;
-    if (location.hash.includes("step=")) ctx.go(`#/jobs/${detail.job.id}/crew`, { replace: true, quiet: true });
+    if (current === mine) current = null;
+    if (!replaced && location.hash.includes("step=")) ctx.go(`#/jobs/${detail.job.id}/crew`, { replace: true, quiet: true });
   } });
 
-  current.update = (newDetail) => {
+  mine.update = (newDetail) => {
     const fresh = newDetail.crew.find((c) => c.step === entry.step);
     if (!fresh) return;
-    current.entry = fresh;
+    mine.entry = fresh;
     detail = newDetail;
     render();
     if (view === "activity") renderBody();
@@ -237,26 +238,43 @@ async function renderOutput(body, detail, e) {
 }
 
 function openOrchestrator(ctx, detail) {
-  const msgs = (detail.messages || []).filter((m) => m.to.role === "orchestrator");
-  const textarea = h("textarea", { class: "textarea", rows: 3, "data-autofocus": true, placeholder: "e.g. Pause after this review round; I want to look at the diff." });
+  const body = h("div", { class: "drawer-body", tabindex: "0", "aria-label": "Messages to the orchestrator" });
+  const renderBody = (d) => {
+    const msgs = (d.messages || []).filter((m) => m.to.role === "orchestrator");
+    patch(body, JSON.stringify(msgs.map((m) => [m.id, m.status])), () => msgs.length ? h("div", { class: "convo" }, msgs.map((m) =>
+      h("div", { class: "bubble user" }, m.text, h("div", { class: "meta" }, `You · ${clock(m.ts)}`, " · ",
+        m.status === "delivered" ? `Delivered ${clock(m.delivered?.ts)}` : "Queued"))))
+      : empty("message", "No messages yet", "Steer the whole job: pause, skip, change priorities."));
+  };
+  const textarea = h("textarea", { class: "textarea", rows: 3, id: "orchestrator-msg", "data-autofocus": true,
+    placeholder: "e.g. Pause after this review round; I want to look at the diff.",
+    onkeydown: (ev) => { if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); send(); } } });
+  const sendBtn = h("button", { class: "btn btn-primary", type: "button", onclick: () => send() }, icon("send"), "Send");
+  async function send() {
+    const text = textarea.value.trim();
+    if (!text) { textarea.focus(); return; }
+    sendBtn.disabled = true;
+    try {
+      await post(`/api/jobs/${detail.job.id}/messages`, { to: { role: "orchestrator" }, text });
+      textarea.value = "";
+      toast("Queued for the orchestrator");
+      ctx.refresh();
+    } catch (err) { toast(err.message, "error"); }
+    sendBtn.disabled = false;
+    textarea.focus();
+  }
+  const mine = { step: "@orchestrator", update: (d) => { detail = d; renderBody(d); } };
+  current = mine;
   openDrawer((panel) => mount(panel,
     h("div", { class: "drawer-head" },
       h("div", { class: "attention-icon" }, icon("message", "icon icon-lg")),
       h("div", { class: "stack", style: { gap: "4px" } }, h("span", { class: "eyebrow" }, detail.job.id), h("h2", { class: "h2" }, "Orchestrator")),
       h("button", { class: "btn btn-ghost btn-icon", type: "button", "aria-label": "Close", onclick: () => closeDrawer() }, icon("x"))),
     h("div", { class: "drawer-sub small muted" }, "The Claude Code session running /factory for this job. It receives your message the next time it asks the engine what to do, and its Stop hook surfaces it if it is about to stop."),
-    h("div", { class: "drawer-body" }, msgs.length ? h("div", { class: "convo" }, msgs.map((m) =>
-      h("div", { class: "bubble user" }, m.text, h("div", { class: "meta" }, clock(m.ts), " · ", m.status === "delivered" ? `Delivered ${clock(m.delivered?.ts)}` : "Queued"))))
-      : empty("message", "No messages yet", "Steer the whole job: pause, skip, change priorities.")),
-    h("div", { class: "drawer-foot" }, h("div", { class: "composer" }, h("div", { class: "composer-row" }, textarea,
-      h("button", { class: "btn btn-primary", type: "button", onclick: async () => {
-        const text = textarea.value.trim();
-        if (!text) return;
-        try {
-          await post(`/api/jobs/${detail.job.id}/messages`, { to: { role: "orchestrator" }, text });
-          toast("Queued for the orchestrator");
-          closeDrawer();
-          ctx.refresh();
-        } catch (err) { toast(err.message, "error"); }
-      } }, icon("send"), "Send"))))), { label: "Message the orchestrator" });
+    body,
+    h("div", { class: "drawer-foot" }, h("div", { class: "composer" },
+      h("label", { class: "sr-only", for: "orchestrator-msg" }, "Message the orchestrator"),
+      h("div", { class: "composer-row" }, textarea, sendBtn)))),
+  { label: "Message the orchestrator", onClose: () => { if (current === mine) current = null; } });
+  renderBody(detail);
 }

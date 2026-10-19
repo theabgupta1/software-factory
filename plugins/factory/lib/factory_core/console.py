@@ -41,7 +41,6 @@ def repo_state(paths: RepoPaths) -> dict:
         counts[j["status"]] = counts.get(j["status"], 0) + 1
     return {
         "version": __version__,
-        "generated_at": now_iso(),
         "repo": {"name": paths.root.name, "root": str(paths.root), "base_branch": base,
                  "initialized": paths.state.exists(), "config_error": cfg_error},
         "jobs": jobs,
