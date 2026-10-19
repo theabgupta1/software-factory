@@ -46,7 +46,10 @@ def _params(values: list[str] | None) -> dict[str, str]:
 def _request(args) -> str:
     if args.request == ["-"]:
         return sys.stdin.read()
-    return " ".join(args.request or [])
+    text = " ".join(args.request or [])
+    if not text.strip() and not getattr(args, "from_issue", None):
+        raise FactoryError("give a request (or --from-issue N)")
+    return text
 
 
 # ---- commands -------------------------------------------------------------------------------
@@ -59,10 +62,37 @@ def cmd_init(args) -> int:
     return 0
 
 
+def issue_request(number: int, cwd: Path) -> tuple[str, str, dict]:
+    """Read a GitHub issue with the gh CLI (read-only) and turn it into a request."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("gh"):
+        raise FactoryError("--from-issue needs the GitHub CLI (gh) installed and authenticated")
+    try:
+        proc = subprocess.run(["gh", "issue", "view", str(number), "--json", "number,title,body,url"],
+                              cwd=str(cwd), capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        raise FactoryError("gh issue view timed out after 30s") from exc
+    if proc.returncode != 0:
+        raise FactoryError(f"gh issue view {number} failed: {(proc.stderr or proc.stdout).strip()[:300]}")
+    data = json.loads(proc.stdout)
+    body = (data.get("body") or "").strip()
+    request = f"{data['title']}\n\n{body}\n\n(GitHub issue #{data['number']}: {data['url']})".strip()
+    return request, data["title"], {"issue": str(data["number"]), "issue_url": data["url"]}
+
+
 def cmd_new(args) -> int:
     eng = _engine(args)
-    job = eng.new_job(_request(args), workflow=args.workflow, size=args.size, why=args.why or "",
-                      params=_params(args.param), title=args.title)
+    request, title, params = _request(args), args.title, _params(args.param)
+    if args.from_issue:
+        issue_text, issue_title, issue_params = issue_request(args.from_issue, eng.paths.root)
+        extra = request.strip()
+        request = issue_text + (f"\n\nAlso: {extra}" if extra else "")
+        title = title or issue_title
+        params.update(issue_params)
+    job = eng.new_job(request, workflow=args.workflow, size=args.size, why=args.why or "",
+                      params=params, title=title)
     out = {"job": job["id"], "workflow": job["workflow"], "size": job["size"], "branch": job["branch"],
            "worktree": job["worktree"], "job_dir": str(eng.store.job_dir(job["id"]))}
     if args.backlog_item:
@@ -345,13 +375,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="create .factory/ in this repo").set_defaults(fn=cmd_init)
 
     s = sub.add_parser("new", help="create a job and return its first action")
-    s.add_argument("request", nargs="+", help="the request, or - to read stdin")
+    s.add_argument("request", nargs="*", help="the request, or - to read stdin")
     s.add_argument("--workflow", "-w", default="feature", choices=registry.workflow_ids())
     s.add_argument("--size", "-s", default="M", choices=list(registry.SIZES))
     s.add_argument("--why", help="one line: why this workflow and size")
     s.add_argument("--title")
     s.add_argument("--param", action="append", help="key=value (e.g. agent=sql-engineer, repo=true)")
     s.add_argument("--backlog-item", help="link the claimed backlog line to the new job")
+    s.add_argument("--from-issue", type=int, help="use GitHub issue N (via gh) as the request")
     s.set_defaults(fn=cmd_new)
 
     s = sub.add_parser("next", help="the next action for a job")

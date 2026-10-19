@@ -111,6 +111,50 @@ def diff(repo: Path, base: str, ref: str, max_bytes: int = 1_500_000) -> dict:
     return {"files": files[:DIFF_FILE_LIMIT], "patch": patch, "truncated": truncated}
 
 
+def diffstat(repo: Path, base: str, ref: str, max_lines: int = 60) -> str:
+    proc = git(["diff", "--stat=120", f"{base}...{ref}"], repo, check=False)
+    lines = proc.stdout.splitlines() if proc.returncode == 0 else []
+    if len(lines) > max_lines:
+        lines = lines[: max_lines - 1] + [f" … {len(lines) - max_lines + 1} more lines", lines[-1]]
+    return "\n".join(lines)
+
+
+def copy_into_worktree(repo: Path, worktree: Path, paths: list[str], timeout: int = 300) -> list[str]:
+    """Copy untracked files (e.g. .env, node_modules) from the main checkout; copy-on-write when possible.
+
+    Missing sources and already-present destinations are skipped. Returns the paths copied.
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    copied = []
+    cow = ["-cR"] if sys.platform == "darwin" else ["-R", "--reflink=auto"]
+    for rel in paths:
+        src = (repo / rel)
+        dest = (worktree / rel)
+        if not src.exists() or dest.exists():
+            continue
+        if repo.resolve() not in src.resolve().parents:
+            raise FactoryError(f"worktree.copy entry {rel!r} points outside the repository")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            proc = subprocess.run(["cp", *cow, str(src), str(dest)], capture_output=True, text=True, timeout=timeout)
+            if proc.returncode != 0:
+                proc = subprocess.run(["cp", "-R", str(src), str(dest)], capture_output=True, text=True, timeout=timeout)
+            if proc.returncode != 0:
+                raise FactoryError(f"could not copy {rel} into the worktree: {proc.stderr.strip()[:300]}")
+        except FileNotFoundError:  # no cp (Windows without WSL)
+            if src.is_dir():
+                shutil.copytree(src, dest, symlinks=True)
+            else:
+                shutil.copy2(src, dest)
+        except subprocess.TimeoutExpired as exc:
+            raise FactoryError(f"copying {rel} into the worktree took longer than {timeout}s") from exc
+        copied.append(rel)
+    return copied
+
+
 def supports_merge_tree(repo: Path) -> bool:
     proc = git(["merge-tree", "-h"], repo, check=False)
     return "--write-tree" in (proc.stdout + proc.stderr)

@@ -138,3 +138,32 @@ actual run; anything not executed is NOT RUN with a reason.
 
 1. Engine + `feature` parity + legacy → 2. agents + skill + hooks → 3. console (Crew/chat first) →
 4. remaining workflows → 5. mod → 6. installer, evals, matrix → 7. reviews, docs, push.
+
+## 10. Ideas taken from mattpocock/sandcastle
+
+[Sandcastle](https://github.com/mattpocock/sandcastle) is a TypeScript library that runs coding agents in
+isolated sandboxes (Docker/Podman/Vercel) with branch strategies, prompt templates and session resume. Reviewed
+2026-10-19. What the factory adopted, adapted to its own architecture:
+
+| Sandcastle idea | Factory version |
+|---|---|
+| `copyToWorktree` (copy-on-write `node_modules`, `.env`) + `onWorktreeReady`/`onSandboxReady` hooks | `worktree.copy` (engine copies untracked files into each new worktree, CoW when the OS supports it, missing paths skipped, paths confined to the repo) and `worktree.setup` (exact commands the orchestrator runs before any agent; replaces "read AGENTS.md and figure it out") |
+| `` !`git log` `` / `` !`git diff` `` prompt expansion | A **context snapshot** computed by the engine for reviewers and the approver: commits on the branch, commits since the previous review round, and the diffstat. No arbitrary shell in prompts, so repo content can't inject commands |
+| `CODING_STANDARDS.md` loaded by the reviewer | `.factory/standards.md` (or `CODING_STANDARDS.md`) is an input for every agent; `.factory/prompts/<agent>.md` adds repo-specific instructions to one agent without forking the plugin |
+| Branch strategies (`head`, `merge-to-head`, `branch`) | `deliver: merge` (default, original behaviour) or `deliver: branch` (approved jobs stop with the branch ready and the exact `git push` / `gh pr create` commands — the factory still never pushes) |
+| Idle/completion timeouts | Stall detection: an agent with no transcript activity for `stall_minutes` is flagged "quiet" in the console, so you can message it or resume |
+| Issue-tracker templates (`gh issue list`) | `factoryctl new --from-issue N` (read-only `gh issue view`) |
+| Simple loop over issues | `/factory next --all` drains the backlog one job after another |
+| Structured output with schema validation + retry in the same session | Already the factory's model: artifact contracts checked by the engine, and the SubagentStop hook blocks once with the problems so the agent fixes its output in its own session |
+| ADRs for every design decision | `docs/adr/` |
+
+Not adopted, deliberately:
+- **Container sandboxes per agent.** Factory agents are Claude Code subagents inside the user's session, so
+  they inherit its permissions, sandbox settings and hooks; Sandcastle instead launches separate `claude`
+  processes in containers with their own credentials. For unattended runs, enable Claude Code's native sandbox
+  and keep the factory guard. Because `factoryctl next/done` is executor-agnostic, a Sandcastle-based executor
+  that runs each issued step in a container is a natural follow-up.
+- **Parallel task branches merged by a merge agent** (`parallel-planner`). Plan tasks run sequentially in one
+  worktree with per-task commits and ownership checks; per-task branches in parallel are the next step for
+  large plans (follow-up).
+- **Session fork.** The Agent tool has no fork; reviewers start fresh with the context snapshot instead.

@@ -109,7 +109,20 @@ def read_artifact(job_dir: Path, rel: str) -> dict:
     return {"path": rel, "text": text, "truncated": size > ARTIFACT_LIMIT, "size": size}
 
 
-def crew(store: Store, job: dict) -> list[dict]:
+def _last_activity(transcript: str | None) -> str | None:
+    if not transcript:
+        return None
+    import datetime as _dt
+    import os
+
+    try:
+        mtime = os.path.getmtime(transcript)
+    except OSError:
+        return None
+    return _dt.datetime.fromtimestamp(mtime, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def crew(store: Store, job: dict, stall_minutes: int = 20) -> list[dict]:
     """One entry per agent invocation (step attempt), joined with telemetry and messages."""
     roster = registry.roster()["agents"]
     runs = {}
@@ -127,6 +140,8 @@ def crew(store: Store, job: dict) -> list[dict]:
         last = tele[-1] if tele else {}
         msgs = [m for m in messages if (m["to"].get("step") == sid) or (m["to"].get("agent") == agent and (
             m["status"] == "queued" or (m.get("delivered") or {}).get("step") == sid))]
+        last_activity = _last_activity(last.get("transcript")) if step.get("status") == "issued" else None
+        quiet = seconds_between(last_activity or step.get("issued_at"), now_iso()) if step.get("status") == "issued" else None
         out.append({
             "step": sid,
             "stage": step.get("stage"),
@@ -158,6 +173,9 @@ def crew(store: Store, job: dict) -> list[dict]:
             "warnings": step.get("warnings") or [],
             "messages": msgs,
             "summary": meta.get("summary"),
+            "last_activity": last_activity,
+            "quiet_seconds": quiet,
+            "stalled": bool(quiet is not None and quiet > stall_minutes * 60),
         })
     status_rank = {"issued": 0, "invalid": 1, "failed": 1, "lost": 2, "done": 3}
     out.sort(key=lambda c: (status_rank.get(c["status"], 4), c.get("issued_at") or ""))
@@ -260,11 +278,15 @@ def job_detail(paths: RepoPaths, job_id: str) -> dict:
     job = store.load(job_id)
     wf = read_json(job_dir / "workflow.json", default=None) or registry.load_workflow(job["workflow"])
     plan_data = read_json(job_dir / "plan.json", default=None)
+    try:
+        stall = int(config.load(paths).get("stall_minutes") or 20)
+    except FactoryError:
+        stall = 20
     return {
         "job": job,
         "legacy": False,
         "events": read_jsonl(job_dir / "events.jsonl")[-500:],
-        "crew": crew(store, job),
+        "crew": crew(store, job, stall),
         "artifacts": artifacts(job_dir, job.get("steps") or {}),
         "messages": store.messages(job_id),
         "stages": stages_view(job, wf),

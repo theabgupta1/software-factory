@@ -46,6 +46,8 @@ function agentCard(c, ctx, detail) {
       c.usage?.total ? h("span", {}, h("b", {}, tokens(c.usage.total)), " tokens") : null,
       c.tool_uses ? h("span", {}, h("b", {}, String(c.tool_uses)), " tool calls") : null,
       c.attempt > 1 ? h("span", {}, `attempt ${c.attempt}`) : null,
+      c.stalled ? h("span", { class: "msg-badge", style: { color: "var(--st-changes)" }, title: "No transcript activity recently; message it or check the session" },
+        icon("alert"), `quiet ${duration(c.quiet_seconds)}`) : null,
       queued ? h("span", { class: "msg-badge" }, icon("message"), `${queued} queued`) : null,
       delivered ? h("span", { class: "faint" }, icon("check"), ` ${delivered} delivered`) : null));
 }

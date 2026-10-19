@@ -97,6 +97,12 @@ function nextAction(detail, ctx, crewRunning) {
         job.merge?.sha ? h("span", {}, "Merge commit ", h("code", {}, job.merge.sha.slice(0, 12)), ". ") : null,
         "The final report is in ", h("a", { href: `#/jobs/${job.id}/artifacts?file=final-report.md` }, "final-report.md"), "."));
   }
+  if (job.status === "delivered" && job.outcome === "branch") {
+    return box("done", "branch", `Approved — ${job.branch} is ready for a pull request`,
+      h("div", { class: "stack" },
+        h("p", { class: "small muted", style: { margin: 0 } }, "This repository delivers approved jobs as branches. Nothing was merged or pushed; these are yours to run:"),
+        (job.delivery?.commands || []).map((c) => copyField(c))));
+  }
   if (job.status === "delivered") {
     const deliverable = detail.artifacts.find((a) => /^(research|report|security-audit)\.md$/.test(a.path));
     return box("done", "check", "Delivered",

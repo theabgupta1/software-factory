@@ -32,6 +32,13 @@ DEFAULTS: dict[str, Any] = {
         "perf_globs": [],
     },
     "guard": {"scope": "factory"},
+    # Fresh worktrees lack untracked files; `copy` brings them over (copy-on-write when the OS can),
+    # `setup` lists the commands the orchestrator runs before any agent starts.
+    "worktree": {"copy": [], "setup": [], "setup_timeout_seconds": 900},
+    # merge: approved jobs merge into the base branch locally (the original behaviour).
+    # branch: approved jobs stop with their branch ready for a pull request; nothing is merged or pushed.
+    "deliver": "merge",
+    "stall_minutes": 20,
 }
 
 _TYPES = {
@@ -45,6 +52,9 @@ _TYPES = {
     "models": dict,
     "panel": dict,
     "guard": dict,
+    "worktree": dict,
+    "deliver": str,
+    "stall_minutes": int,
 }
 
 
@@ -68,6 +78,19 @@ def validate(raw: Any) -> list[str]:
             continue
         if not isinstance(value, _TYPES[key]):
             problems.append(f"{key!r} has the wrong type")
+    if raw.get("deliver") not in (None, "merge", "branch"):
+        problems.append("'deliver' must be 'merge' or 'branch'")
+    wt = raw.get("worktree", {})
+    if isinstance(wt, dict):
+        for key in wt:
+            if key not in DEFAULTS["worktree"]:
+                problems.append(f"unknown worktree key {key!r}")
+        for key in ("copy", "setup"):
+            if key in wt and not (isinstance(wt[key], list) and all(isinstance(x, str) and x.strip() for x in wt[key])):
+                problems.append(f"worktree.{key} must be a list of non-empty strings")
+        for rel in wt.get("copy", []) if isinstance(wt.get("copy"), list) else []:
+            if isinstance(rel, str) and (rel.startswith("/") or ".." in rel.replace("\\", "/").split("/")):
+                problems.append(f"worktree.copy entry {rel!r} must be a path inside the repository")
     limits = raw.get("limits", {})
     if isinstance(limits, dict):
         for key, value in limits.items():

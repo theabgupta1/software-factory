@@ -339,6 +339,11 @@ class Engine:
         elif not Path(job["worktree"]).exists():
             gitops.create_worktree(repo, Path(job["worktree"]), job["branch"], job["base_branch"])
             self.store.event(job, "worktree.recreated", worktree=job["worktree"])
+        wt_cfg = self.cfg.get("worktree") or {}
+        if wt_cfg.get("copy") and not job.get("copied"):
+            copied = gitops.copy_into_worktree(repo, Path(job["worktree"]), wt_cfg["copy"])
+            job["copied"] = copied or ["(nothing to copy)"]
+            self.store.event(job, "worktree.copied", paths=copied)
         if not stage.get("install"):
             return ADVANCE
         sid = "setup/deps"
@@ -349,18 +354,27 @@ class Engine:
             if step is None:
                 return self._limit_action(job)
         if step["status"] == "issued":
+            done_cmd = (f"`factoryctl done {job['id']} {sid} --attempt {step['attempt']} --status ok` "
+                        "(or `--status error --note \"<what failed>\"`)")
+            commands = wt_cfg.get("setup") or []
+            if commands:
+                listed = "\n".join(f"{i}. `cd {job['worktree']} && {c}`" for i, c in enumerate(commands, 1))
+                instruction = (f"Prepare the fresh worktree by running these commands from .factory/config.json, in "
+                               f"order, each with a Bash timeout of at least {wt_cfg.get('setup_timeout_seconds', 900)} "
+                               f"seconds (use run_in_background for long installs):\n{listed}\n"
+                               f"Stop at the first failure. Then record the result with {done_cmd}.")
+            else:
+                instruction = (f"Prepare the fresh worktree {job['worktree']}: run the setup that AGENTS.md (or "
+                               "CLAUDE.md) gives for a fresh checkout, such as installing dependencies, from inside "
+                               "the worktree. If the repo documents no setup, there is nothing to run. Then record "
+                               f"the result with {done_cmd}.")
             return {
                 "kind": "inline",
                 "step": sid,
                 "attempt": step["attempt"],
                 "worktree": job["worktree"],
-                "instruction": (
-                    f"Prepare the fresh worktree {job['worktree']}: run the setup that AGENTS.md (or CLAUDE.md) "
-                    "gives for a fresh checkout, such as installing dependencies, from inside the worktree. If the "
-                    "repo documents no setup, there is nothing to run. Then record the result with "
-                    f"`factoryctl done {job['id']} {sid} --attempt {step['attempt']} --status ok` "
-                    "(or `--status error --note \"<what failed>\"`)."
-                ),
+                "commands": commands,
+                "instruction": instruction,
                 "say": f"{job['id']}: preparing the worktree",
             }
         return ADVANCE
@@ -596,6 +610,8 @@ class Engine:
         return self._human_action(job)
 
     def _h_merge(self, job: dict, stage: dict):
+        if self.cfg.get("deliver") == "branch":
+            return self._deliver_branch(job)
         result = gitops.merge(self.paths.root, job["base_branch"], job["branch"], Path(job["worktree"]), job["title"])
         self.store.event(job, "merge." + ("done" if result.status == "merged" else "failed"),
                          status=result.status, message=result.message, sha=result.sha)
@@ -614,6 +630,25 @@ class Engine:
                 else f"Resolve it on {job['branch']} in {job['worktree']} (or rework), then approve again.")
         return self._to_human(job, kind, f"Approved but not merged: {result.message}. {hint}",
                               [f"/factory approve {job['id']}", f"/factory rework {job['id']} <note>"], [])
+
+    def _deliver_branch(self, job: dict) -> dict:
+        """deliver: branch — stop with the approved branch ready for a pull request (never pushed)."""
+        worktree = Path(job["worktree"])
+        note = None
+        if worktree.exists() and gitops.is_clean(worktree):
+            from .paths import git
+
+            rm = git(["worktree", "remove", str(worktree)], self.paths.root, check=False)
+            note = None if rm.returncode == 0 else f"kept the worktree: {(rm.stderr or rm.stdout).strip()[:200]}"
+        job["status"] = "delivered"
+        job["outcome"] = "branch"
+        commands = [f"git push -u origin {job['branch']}",
+                    f"gh pr create --head {job['branch']} --base {job['base_branch']} --title \"{job['title'][:70]}\" "
+                    f"--body-file .factory/jobs/{job['id']}/final-report.md"]
+        job["delivery"] = {"branch": job["branch"], "commands": commands, "at": now_iso(), "note": note}
+        self.store.event(job, "job.delivered", outcome="branch", branch=job["branch"])
+        self._write_report(job)
+        return self._done_action(job, f"approved; {job['branch']} is ready for a pull request (not pushed)")
 
     def _h_deliver(self, job: dict, stage: dict):
         note = gitops.remove_unused_worktree(self.paths.root, Path(job["worktree"]), job["branch"], job["base_branch"])
@@ -679,12 +714,24 @@ class Engine:
         inputs = [p.name for p in sorted(job_dir.glob("*.md")) if p.name != member["output"]]
         if (job_dir / "plan.json").exists():
             inputs.append("plan.json")
+        standards = self._standards_file()
+        if standards is not None:
+            inputs.append(str(standards))
         text = prompts.header(job, sid, step["attempt"], job_dir, output, round_no=job.get("round") or None,
                               mode=mode, port=port, inputs=inputs[:12])
         body = prompts.instruction("task" if task else kind, job=job, stage=stage, mode=mode,
                                    round_no=job.get("round"), panel=panel_members, member=member, task=task)
         if brief:
             body = brief + "\n\n" + body
+        snapshot = self._context_snapshot(job, kind)
+        if snapshot:
+            body += "\n\n" + snapshot
+        if standards is not None:
+            body += (f"\n\nRepository standards: follow {standards} (the repository's own rules; they win over "
+                     "general preferences).")
+        extra = self._agent_additions(agent)
+        if extra:
+            body += f"\n\nRepository-specific instructions for the {meta.get('title', agent)}:\n{extra}"
         pending = self.store.pending_messages(job["id"], step=sid, agent=agent) if deliver_messages else []
         rework = job.get("rework")
         warnings = []
@@ -888,9 +935,12 @@ class Engine:
 
     def _done_action(self, job: dict, message: str) -> dict:
         report_path = self.store.job_dir(job["id"]) / "final-report.md"
-        return {"kind": "done", "outcome": job.get("outcome") or job["status"],
-                "report": str(report_path) if report_path.exists() else None,
-                "say": f"{job['id']}: {message}"}
+        action = {"kind": "done", "outcome": job.get("outcome") or job["status"],
+                  "report": str(report_path) if report_path.exists() else None,
+                  "say": f"{job['id']}: {message}"}
+        if (job.get("delivery") or {}).get("commands"):
+            action["commands"] = job["delivery"]["commands"]
+        return action
 
     def _finalise_action(self, job: dict, action: dict) -> dict:
         action = {"v": PROTOCOL_VERSION, "job": job["id"], "epoch": job["epoch"], **action}
@@ -922,6 +972,40 @@ class Engine:
 
     def _out(self, job: dict, step: dict) -> Path:
         return self.store.job_dir(job["id"]) / step["output"]
+
+    def _standards_file(self) -> Path | None:
+        for candidate in (self.paths.state / "standards.md", self.paths.root / "CODING_STANDARDS.md"):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _agent_additions(self, agent: str) -> str:
+        """`.factory/prompts/<agent>.md`: the repo's own additions to one agent's instructions."""
+        path = self.paths.state / "prompts" / f"{agent}.md"
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+        except (FileNotFoundError, IsADirectoryError):
+            return ""
+        return text[:8000]
+
+    def _context_snapshot(self, job: dict, kind: str) -> str:
+        """Commits and diffstat computed at issue time, so reviewers and the approver start oriented."""
+        if kind not in ("review", "approve") or not job.get("base_sha"):
+            return ""
+        base = job["base_sha"]
+        commits = gitops.log(self.paths.root, base, job["branch"], limit=40)
+        lines = ["Context snapshot (computed by the factory when this step was issued):",
+                 f"Commits on {job['branch']} since {job['base_branch']} ({len(commits)}):"]
+        lines += [f"- {c['short']} {c['subject']}" for c in commits] or ["- (none)"]
+        if kind == "review" and len(job.get("rounds") or []) >= 2:
+            prev = job["rounds"][-2]
+            since = gitops.log(self.paths.root, prev["head"], job["branch"], limit=40)
+            lines.append(f"Commits since round {prev['n']} was reviewed ({len(since)}):")
+            lines += [f"- {c['short']} {c['subject']}" for c in since] or ["- (none)"]
+        stat = gitops.diffstat(self.paths.root, base, job["branch"])
+        if stat:
+            lines += ["Diffstat:", "```", stat, "```"]
+        return "\n".join(lines)
 
     def _fingerprint(self, path: Path) -> str | None:
         import hashlib
