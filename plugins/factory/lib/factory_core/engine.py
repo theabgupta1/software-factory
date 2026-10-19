@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from . import SCHEMA_VERSION, config, contracts, gitops, panel, plan, prompts, registry, report
+from . import SCHEMA_VERSION, config, contracts, gitops, panel, plan, projects, prompts, registry, report
 from .paths import RepoPaths, ensure_state_dir
 from .store import TERMINAL, Store
 from .util import FactoryError, now_iso, seconds_between, slugify, write_text_atomic
@@ -52,6 +52,7 @@ class Engine:
             if agent not in registry.IMPLEMENTERS:
                 raise FactoryError(f"quick jobs need an implementing agent; {agent!r} is not one")
         ensure_state_dir(self.paths)
+        projects.touch(self.paths.root)
         job_id = self.store.claim_id(slugify(title or request))
         num = int(job_id.split("-", 1)[0])
         now = now_iso()

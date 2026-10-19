@@ -25,9 +25,18 @@ class FactoryError(Exception):
         self.code = code
 
 
+_CLOCK = None  # optional override used by the demo generator and tests
+
+
+def set_clock(fn) -> None:
+    """Install (or with None, remove) a function returning an aware datetime used by now_iso()."""
+    global _CLOCK
+    _CLOCK = fn
+
+
 def now_iso() -> str:
     """UTC timestamp with millisecond precision, e.g. 2026-10-18T16:23:24.496Z."""
-    t = _dt.datetime.now(_dt.timezone.utc)
+    t = _CLOCK() if _CLOCK is not None else _dt.datetime.now(_dt.timezone.utc)
     return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z"
 
 

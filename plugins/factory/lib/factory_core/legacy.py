@@ -39,6 +39,8 @@ def summarize_v1(job: dict, job_dir: Path) -> dict:
         "attention": None,
         "running": [],
         "running_agents": [],
+        "running_detail": [],
+        "counters": {},
         "reviews": job.get("reviews") or {},
         "outcome": "merged" if status == "merged" else None,
         "pending_messages": 0,

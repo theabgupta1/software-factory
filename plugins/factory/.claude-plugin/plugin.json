@@ -1,0 +1,9 @@
+{
+  "name": "factory",
+  "version": "2.0.0",
+  "description": "Software Factory: a multi-agent engineering factory for Claude Code. /factory turns a request into a planned, built, reviewed and merged change, with 25 specialist agents, 11 workflows, a deterministic engine and a live web console.",
+  "author": {"name": "Software Factory contributors"},
+  "repository": "https://github.com/theabgupta1/software-factory",
+  "license": "MIT",
+  "keywords": ["multi-agent", "orchestration", "workflow", "code-review", "data-engineering", "infrastructure"]
+}

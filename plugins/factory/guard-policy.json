@@ -1,0 +1,131 @@
+{
+  "$comment": "Command guard for factory agents (PreToolUse on Bash). deny = blocked with the reason; ask = Claude Code asks the human. Patterns are Python regexes searched in the whole command (compound commands included). This is defence in depth on top of Claude Code permissions, not a sandbox.",
+  "rules": [
+    {
+      "id": "no-push",
+      "decision": "deny",
+      "pattern": "\\bgit\\s+(?:-C\\s+\\S+\\s+|-c\\s+\\S+\\s+)*push\\b",
+      "reason": "The factory never pushes. Commit on the job branch; the human decides what to push."
+    },
+    {
+      "id": "rm-root",
+      "decision": "deny",
+      "pattern": "\\brm\\s+(?:-\\S+\\s+)*(?:-\\S*[rR]\\S*|--recursive)\\s+(?:-\\S+\\s+)*(?:/|/\\*|~/?|\\$HOME/?|\\.\\.?/?|\\*)(?:\\s|$|;|&)",
+      "reason": "Recursive delete of a root, home, parent or wildcard path is never allowed."
+    },
+    {
+      "id": "rm-no-preserve-root",
+      "decision": "deny",
+      "pattern": "--no-preserve-root",
+      "reason": "--no-preserve-root is never allowed."
+    },
+    {
+      "id": "disk-wipe",
+      "decision": "deny",
+      "pattern": "\\b(mkfs(\\.\\w+)?|fdisk|diskutil\\s+erase\\w*)\\b|\\bdd\\s+[^|;&]*of=/dev/",
+      "reason": "Disk formatting and raw device writes are never allowed."
+    },
+    {
+      "id": "fork-bomb",
+      "decision": "deny",
+      "pattern": ":\\(\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}\\s*;\\s*:",
+      "reason": "Fork bombs are never allowed."
+    },
+    {
+      "id": "chmod-root",
+      "decision": "deny",
+      "pattern": "\\bch(mod|own)\\s+-R\\s+\\S+\\s+(/|~|\\$HOME)(\\s|$)",
+      "reason": "Recursive permission changes on root or home are never allowed."
+    },
+    {
+      "id": "iac-apply",
+      "decision": "deny",
+      "pattern": "\\b(terraform|tofu|terragrunt)\\s+(?:-chdir=\\S+\\s+|run-all\\s+)?(apply|destroy|import|taint|untaint|force-unlock)\\b|\\b(terraform|tofu)\\s+(?:-chdir=\\S+\\s+)?state\\s+(rm|mv|push|replace-provider)\\b",
+      "reason": "The factory never applies or mutates infrastructure state. It writes code and runs fmt/validate/plan; a human applies after approval."
+    },
+    {
+      "id": "pulumi-up",
+      "decision": "deny",
+      "pattern": "\\bpulumi\\s+(up|destroy|refresh|import|state)\\b|\\bcdk\\s+(deploy|destroy)\\b|\\bserverless\\s+(deploy|remove)\\b|\\bsam\\s+deploy\\b",
+      "reason": "The factory never deploys infrastructure. A human deploys after approval."
+    },
+    {
+      "id": "publish",
+      "decision": "deny",
+      "pattern": "\\b(npm|pnpm|yarn)\\s+publish\\b|\\btwine\\s+upload\\b|\\bcargo\\s+publish\\b|\\bgem\\s+push\\b|\\bdocker\\s+push\\b|\\bpoetry\\s+publish\\b|\\bgh\\s+(release\\s+create|pr\\s+merge|repo\\s+delete)\\b",
+      "reason": "Publishing packages, images or releases is a human decision."
+    },
+    {
+      "id": "kubectl-mutate",
+      "decision": "ask",
+      "pattern": "\\bkubectl\\b[^|;&]*\\s(apply|create|delete|replace|patch|scale|edit|drain|cordon|uncordon|taint|label|annotate|rollout\\s+(restart|undo))\\b",
+      "reason": "This changes a Kubernetes cluster. Confirm it targets a disposable local cluster."
+    },
+    {
+      "id": "helm-mutate",
+      "decision": "ask",
+      "pattern": "\\bhelm\\b[^|;&]*\\s(install|upgrade|uninstall|rollback|delete)\\b",
+      "reason": "This changes a Kubernetes cluster through Helm."
+    },
+    {
+      "id": "aws-mutate",
+      "decision": "ask",
+      "pattern": "\\baws\\s+[a-z0-9-]+\\s+(create|delete|put|update|terminate|run|modify|attach|detach|remove|start|stop|reboot|deregister|register|revoke|authorize|restore|copy|sync|mv|rm|cp|invoke|publish|send|tag|untag)[a-z0-9-]*\\b",
+      "reason": "This AWS CLI call can change cloud resources or data."
+    },
+    {
+      "id": "gcloud-mutate",
+      "decision": "ask",
+      "pattern": "\\bgcloud\\s+(?:[a-z0-9-]+\\s+){1,4}(create|delete|deploy|update|set-iam-policy|add-iam-policy-binding|remove-iam-policy-binding|patch|resize|reset|import)\\b|\\bgsutil\\s+(rm|mv|cp|rsync)\\b|\\bbq\\s+(rm|mk|load|cp|update|query\\s+.*\\b(insert|update|delete|merge|drop|truncate|create)\\b)",
+      "reason": "This Google Cloud call can change cloud resources or data."
+    },
+    {
+      "id": "az-mutate",
+      "decision": "ask",
+      "pattern": "\\baz\\s+(?:[a-z0-9-]+\\s+){1,4}(create|delete|deploy|update|set|purge|restart|stop|start)\\b",
+      "reason": "This Azure CLI call can change cloud resources."
+    },
+    {
+      "id": "sql-destructive",
+      "decision": "ask",
+      "pattern": "(?i)\\b(psql|mysql|mariadb|sqlcmd|snowsql|clickhouse-client|duckdb|sqlite3|cqlsh|mongosh|redis-cli)\\b.*\\b(drop\\s+(database|schema|table)|truncate\\s+|delete\\s+from\\s+\\w+\\s*(;|$|\")|flushall|flushdb|dropDatabase)",
+      "reason": "This drops or truncates data. Confirm the target is a disposable local database."
+    },
+    {
+      "id": "prod-hint",
+      "decision": "ask",
+      "pattern": "(?i)(--env(ironment)?[= ]prod(uction)?\\b|\\bprod(uction)?[-_.](db|database|cluster|account|project)\\b|NODE_ENV=production\\s+\\S+\\s+(migrate|seed))",
+      "reason": "This looks like it targets production."
+    },
+    {
+      "id": "migrate-remote",
+      "decision": "ask",
+      "pattern": "(?i)\\b(alembic\\s+upgrade|flyway\\s+migrate|liquibase\\s+update|prisma\\s+migrate\\s+deploy|rails\\s+db:migrate|manage\\.py\\s+migrate|knex\\s+migrate:latest|sequelize\\s+db:migrate)\\b.*\\b(DATABASE_URL|--url|-url)=?\\S*(?<!localhost)(?<!127\\.0\\.0\\.1)\\b",
+      "reason": "This runs migrations against an explicitly configured database URL."
+    },
+    {
+      "id": "pipe-to-shell",
+      "decision": "ask",
+      "pattern": "\\b(curl|wget)\\b[^|;&]*\\|\\s*(sudo\\s+)?(ba|z|da)?sh\\b",
+      "reason": "This downloads and executes a remote script."
+    },
+    {
+      "id": "sudo",
+      "decision": "ask",
+      "pattern": "(^|[;&|]\\s*|\\s)sudo\\s",
+      "reason": "This runs a command as root."
+    },
+    {
+      "id": "secrets-read",
+      "decision": "ask",
+      "pattern": "(~|\\$HOME|/Users/[^/\\s]+|/home/[^/\\s]+)/\\.(aws/credentials|ssh/id_[a-z0-9]+|netrc|docker/config\\.json|kube/config|config/gcloud/(credentials|application_default))",
+      "reason": "This reads a credential file. Agents must not read or print secrets."
+    },
+    {
+      "id": "git-config-global",
+      "decision": "ask",
+      "pattern": "\\bgit\\s+config\\s+--(global|system)\\b",
+      "reason": "This changes the user's global git configuration."
+    }
+  ]
+}

@@ -147,15 +147,17 @@ def agent_runs(store, job: dict) -> list[dict]:
     return list(runs.values())
 
 
-def transcript_allowed(path: str | None) -> Path | None:
-    """Only serve transcripts that live under a Claude projects directory."""
+def transcript_allowed(path: str | None, extra_roots: list[Path] | None = None) -> Path | None:
+    """Only serve transcripts that live under a Claude projects directory (or an explicit extra root)."""
     if not path:
         return None
     p = Path(os.path.realpath(path))
-    roots = [Path(os.path.realpath(os.path.expanduser(r))) for r in
+    if p.suffix != ".jsonl":
+        return None
+    roots = [Path(os.path.realpath(os.path.expanduser(r))) / "projects" for r in
              (os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"), "~/.claude")]
+    roots += [Path(os.path.realpath(r)) for r in (extra_roots or [])]
     for root in roots:
-        projects = root / "projects"
-        if projects in p.parents and p.suffix == ".jsonl":
+        if root in p.parents:
             return p
     return None

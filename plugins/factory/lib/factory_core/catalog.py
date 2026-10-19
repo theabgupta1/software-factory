@@ -77,9 +77,13 @@ def agents() -> list[dict]:
     return out
 
 
+WORKFLOW_ORDER = ["feature", "fix", "quick", "research", "review", "data", "infra", "refactor", "perf", "security", "docs"]
+
+
 def workflows() -> list[dict]:
     out = []
-    for wid in registry.workflow_ids():
+    ids = registry.workflow_ids()
+    for wid in sorted(ids, key=lambda w: (WORKFLOW_ORDER.index(w) if w in WORKFLOW_ORDER else 99, w)):
         wf = registry.load_workflow(wid)
         out.append(wf)
     return out

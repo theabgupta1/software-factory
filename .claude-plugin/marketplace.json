@@ -1,0 +1,17 @@
+{
+  "name": "software-factory",
+  "owner": {"name": "theabgupta1"},
+  "metadata": {"description": "Software Factory plugins for Claude Code"},
+  "plugins": [
+    {
+      "name": "factory",
+      "source": "./plugins/factory",
+      "description": "Multi-agent engineering factory: /factory, 25 agents, 11 workflows, safety hooks and the Factory Console."
+    },
+    {
+      "name": "factory-live",
+      "source": "./plugins/factory-live",
+      "description": "Live factory pane, attention band and status line inside Claude Code (uses the early-access mod API)."
+    }
+  ]
+}
