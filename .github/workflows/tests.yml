@@ -1,0 +1,38 @@
+# Runs the free, deterministic test layers on every pull request and on main.
+# Safe for pull requests from forks: read-only token, no secrets, no pull_request_target, nothing is published,
+# pushed or deployed. The paid layer (live model runs) never runs here.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GIT_AUTHOR_NAME: CI
+      GIT_AUTHOR_EMAIL: ci@example.invalid
+      GIT_COMMITTER_NAME: CI
+      GIT_COMMITTER_EMAIL: ci@example.invalid
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Generated files are current
+        run: |
+          python3 scripts/build_agents.py --check
+          python3 scripts/build_docs.py --check
+      - name: Static, unit, integration, e2e, install, evals and JS layers
+        run: python3 scripts/testkit.py static unit integration e2e install evals js

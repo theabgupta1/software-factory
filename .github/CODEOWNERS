@@ -1,0 +1,3 @@
+# Every change needs the owner's review. With "Require review from Code Owners" on in the main branch rules,
+# no pull request can be merged without @theabgupta1's approval.
+* @theabgupta1
