@@ -67,6 +67,20 @@ class Manifests(unittest.TestCase):
         for p in market["plugins"]:
             self.assertTrue((ROOT / p["source"]).is_dir(), p["source"])
 
+    def test_generated_docs_are_current(self):
+        import subprocess
+
+        proc = subprocess.run([sys.executable, str(ROOT / "scripts" / "build_docs.py"), "--check"], capture_output=True,
+                              text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_doc_links_resolve(self):
+        docs = [ROOT / "README.md", *(ROOT / "docs").rglob("*.md"), ROOT / "upstream" / "NOTICE.md"]
+        for md in docs:
+            for link in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", md.read_text()):
+                if not link.startswith(("http://", "https://", "mailto:")):
+                    self.assertTrue((md.parent / link).exists(), f"{md.relative_to(ROOT)} links to missing {link}")
+
     def test_version_matches_engine(self):
         from factory_core import __version__
 

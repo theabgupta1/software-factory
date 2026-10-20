@@ -3,6 +3,11 @@
 Living plan for turning the ZazenCodes software factory (`upstream/`) into a multi-discipline engineering
 factory for Claude Code. Decisions marked **fixed** came from the user.
 
+## Status
+
+Built: every section below, with two deliberate changes recorded in §3 and §7 — running agents receive messages
+through the hook only (ADR 0006), and factory-live has no autopilot (ADR 0005). Results: docs/TEST-MATRIX.md.
+
 ## Fixed decisions
 
 - Nothing is installed into, and no paid model calls run in, the cloud container this was built in.
