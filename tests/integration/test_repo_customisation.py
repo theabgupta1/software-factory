@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from support import FACTORYCTL, Driver, RepoCase, sh  # noqa: E402
+from support import FACTORYCTL, PLUGIN, Driver, RepoCase, sh  # noqa: E402
 
 from factory_core import config, console  # noqa: E402
 from factory_core.store import Store  # noqa: E402
@@ -89,6 +89,18 @@ class PromptContext(RepoCase):
         sec = next(c for c in self.agents.calls if c["step"] == "review.r1/security")
         self.assertIn("Flag any use of eval()", code["prompt"])
         self.assertNotIn("Flag any use of eval()", sec["prompt"])
+
+
+class Playbooks(RepoCase):
+    def test_ui_agents_are_pointed_at_the_design_playbook(self):
+        eng = self.engine()
+        job = eng.new_job("Greeting", size="S")["id"]
+        Driver(eng, self.agents).run(job)
+        prompts = {c["step"]: c["prompt"] for c in self.agents.calls}
+        book = str(PLUGIN / "playbooks" / "design.md")
+        self.assertIn(f"Playbook (design): {book}", prompts["build.r1/builder"])
+        self.assertNotIn("Playbook (design)", prompts["spec"], "only the roster's UI agents get it")
+        self.assertNotIn("Playbook (design)", prompts["review.r1/code"])
 
 
 class BranchDelivery(RepoCase):

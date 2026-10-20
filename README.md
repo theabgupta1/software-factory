@@ -20,6 +20,12 @@ built on Claude Code's mod API.
   analyst, architect, builder, frontend/backend engineers, debugger, data architect, SQL engineer, data engineer
   (ETL/ELT, Spark), data-quality engineer, cloud architect, IaC engineer, platform engineer, SRE, test architect,
   test engineer, code reviewer, security engineer, performance engineer, UX and UI reviewers, docs engineer, approver.
+  Each works to its field's current best practice (OWASP and ASVS, SLOs and burn-rate alerts, Diátaxis, data
+  contracts, Well-Architected, test-first…).
+- **Interfaces that are not stock** — the builder, frontend engineer and UX/UI reviewers share a design playbook:
+  research best-in-class references (Mobbin, Page Flows, Dribbble, Awwwards…), extend the app's design system or
+  set a deliberate direction, purposeful motion with reduced-motion variants, 3D (Three.js, React Three Fiber) when
+  you ask, WCAG 2.2 AA and Core Web Vitals budgets, and a screenshot critique loop before review.
 - **11 workflows** ([docs/WORKFLOWS.md](docs/WORKFLOWS.md)) — feature, fix, quick, research, review (audit), data,
   infra (plan approval, never applies, always escalates), refactor (characterisation tests first), perf, security,
   docs.

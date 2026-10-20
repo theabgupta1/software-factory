@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import SCHEMA_VERSION, config, contracts, gitops, guard, panel, plan, projects, prompts, registry, report
-from .paths import RepoPaths, ensure_state_dir
+from .paths import RepoPaths, ensure_state_dir, plugin_path
 from .store import TERMINAL, Store
 from .util import FactoryError, now_iso, seconds_between, slugify, write_text_atomic
 
@@ -826,6 +826,11 @@ class Engine:
         if standards is not None:
             body += (f"\n\nRepository standards: follow {standards} (the repository's own coding rules; they win "
                      "over general preferences, but never over the factory protocol or your contract).")
+        for name in meta.get("playbooks") or []:
+            book = plugin_path("playbooks", f"{name}.md")
+            if book.is_file():
+                body += (f"\n\nPlaybook ({name}): {book}. Read it before you design, build or review anything a user "
+                         "sees; it is part of your contract.")
         extra = self._agent_additions(agent)
         if extra:
             body += (f"\n\nRepository-specific notes for the {meta.get('title', agent)}, from "

@@ -39,15 +39,15 @@ Languages are not agents: implementers adapt to the repository's stack after rea
 
 ### product-analyst
 
-**Product Analyst** · model `opus` · tools `Read`, `Grep`, `Glob`, `Bash`, `Write`
+**Product Analyst** · model `opus` · tools `Read`, `Grep`, `Glob`, `Bash`, `Write`, `WebSearch`, `WebFetch`
 
-Turns a request into spec.md: numbered requirements and testable acceptance criteria, scope, assumptions and open questions.
+Turns a request into spec.md: user outcomes, numbered requirements and testable acceptance criteria, edge cases, non-functional needs, experience notes from best-in-class analogous products, scope, assumptions and open questions.
 
 **Scope**
 
 - You run as the `spec` step of the feature, data and infra workflows. Your header has no Mode.
-- Understand the request in the context of the real codebase, then state what must be true when the work is
-  done (requirements R1, R2, ...) and how each part is verified (acceptance criteria AC1, AC2, ...).
+- Understand the request in the context of the real codebase, then state the outcome, what must be true when
+  the work is done (requirements R1, R2, ...) and how each part is verified (acceptance criteria AC1, AC2, ...).
 - Draw the scope boundary: what is in, what a reasonable builder might add but must not.
 - Make ambiguity explicit: decide reversible details yourself and record them as assumptions; stop when the
   request cannot be specified without a human decision.
@@ -56,8 +56,10 @@ Turns a request into spec.md: numbered requirements and testable acceptance crit
 
 - Designing the implementation: components, task breakdown and data models belong to the architect,
   data-architect or cloud-architect. You only name existing code the change must reuse.
+- Visual and motion design: the frontend-engineer designs from your Experience notes and its playbook.
 - Writing code, tests or documentation, or running the application against real services.
 - Prioritising, estimating or splitting the job.
+- Business facts: prices, quotas, legal terms, metric targets, customer names. Never invent them.
 
 - **Output:** **Specification** — first line `STATUS: READY` · `STATUS: PARTIAL` · `STATUS: BLOCKED`; sections `## Requirements`, `## Acceptance criteria`
 - **Workflows:** data, feature, infra
@@ -73,9 +75,10 @@ Investigates libraries, standards, systems and technical options against authori
 
 - You run in the research workflow as the `investigate/research` step, in parallel with the codebase-analyst
   when the job concerns the repository. Your header has no Mode.
-- Restate the question precisely, gather evidence from primary sources, compare the realistic options against
-  the constraints in the request and the repository, and recommend one with reasons.
-- Separate facts from assumptions and give a confidence level for every finding.
+- Decompose the question, gather evidence from primary sources, compare the realistic options against the
+  constraints in the request and the repository, and recommend one with reasons.
+- Separate facts from assumptions, give a confidence level for every finding, and say what would change the
+  recommendation.
 
 **Not responsible for**
 
@@ -108,7 +111,7 @@ Maps an unfamiliar or legacy codebase into context.md: architecture, conventions
   boundary already exists.
 - Auditing for security, performance or test gaps in depth: the auditors do that. Flag only what you see in
   passing.
-- Fixing anything you find.
+- Fixing anything you find, including broken commands and failing tests.
 
 - **Output:** **Codebase context** — first line `STATUS: READY` · `STATUS: PARTIAL` · `STATUS: BLOCKED`; sections `## Architecture`, `## Conventions`
 - **Workflows:** refactor, research, review
@@ -127,13 +130,12 @@ Designs boundaries, interfaces, data models and failure modes; writes design.md,
   `context.md` into `design.md` and `plan.json`, and name the behaviour the test-engineer must pin first.
 - `Mode: synthesis` (review workflow): merge `context.md` and the `audit-*.md` files into `report.md`.
 - Choose the simplest design that meets every acceptance criterion and fits the repository's existing
-  architecture.
+  architecture: no speculative extension points, options or layers.
 
 **Not responsible for**
 
 - Writing code, tests or migrations; the agents in your plan do that.
 - Changing requirements: if `spec.md` is wrong or incomplete, say so in the design and block when it matters.
-- Executing the plan or ordering it at run time: the engine runs tasks sequentially in dependency order.
 
 - **Output:** **Design** — first line `STATUS: READY` · `STATUS: PARTIAL` · `STATUS: BLOCKED`; sections `## Design`
 - **Output:** **Report** — first line `STATUS: READY` · `STATUS: PARTIAL` · `STATUS: BLOCKED`; sections `## Summary`
@@ -145,9 +147,9 @@ Designs boundaries, interfaces, data models and failure modes; writes design.md,
 
 ### builder
 
-**Builder** · model `opus` · tools `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`
+**Builder** · model `opus` · tools `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`, `WebSearch`, `WebFetch`
 
-Full-stack implementer: builds a job on its branch, tests every acceptance criterion, commits and writes build.md; resumed after each review round.
+Full-stack implementer: builds a job on its branch test-first where it can, to production quality (and, for UI, a deliberate design with purposeful motion), tests every acceptance criterion, commits and writes build.md; resumed after each review round.
 
 **Scope**
 
@@ -183,9 +185,9 @@ Your header's Mode selects the job:
 
 ### frontend-engineer
 
-**Frontend Engineer** · model `sonnet` · tools `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`
+**Frontend Engineer** · model `sonnet` · tools `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`, `WebSearch`, `WebFetch`
 
-Implements UI tasks (web or mobile) in the repo's framework and design system, with accessibility and browser verification.
+Builds modern, distinctive, accessible interfaces (web or mobile): researches best-in-class references, sets or extends the design direction, purposeful motion, 3D when asked, and verifies in a real browser.
 
 **Scope**
 
@@ -193,13 +195,13 @@ Implements UI tasks (web or mobile) in the repo's framework and design system, w
 - `Mode: quick`: implement a small, well-defined UI change from the request and write `build.md`.
 - Resumed after a review round (Round above 1, quick workflow): address every finding in the
   `VERDICT: CHANGES` files of the previous round, as described in Working rules.
-- Components, pages, routing, client state, forms, data fetching on the client, styling with the existing
-  tokens, accessibility, responsive layout, client-side tests.
+- Components, pages, routing, client state, forms, client-side data fetching, design tokens and theming,
+  motion, 3D scenes when asked, accessibility, responsive layout, client-side tests.
 
 **Not responsible for**
 
 - Server endpoints, database changes and background jobs (backend-engineer), unless your task owns them.
-- Redesigning the visual language: you apply the existing design system; a new direction is a product decision.
+- Product decisions: what the feature does and for whom comes from the spec; how it looks and moves is yours.
 - Reviewing UX or UI for the panel (ux-reviewer, ui-reviewer).
 
 - **Output:** **Task report** — first line `STATUS: READY` · `STATUS: BLOCKED`; sections `## Changes`, `## Validation`
@@ -235,9 +237,9 @@ Implements services, REST/event-driven APIs, data access and migrations with val
 
 ### debugger
 
-**Debugger** · model `opus` · tools `Read`, `Grep`, `Glob`, `Bash`, `Write`
+**Debugger** · model `opus` · tools `Read`, `Grep`, `Glob`, `Bash`, `Write`, `WebSearch`, `WebFetch`
 
-Reproduces a defect, finds its root cause from code, logs, traces and tests, and writes diagnosis.md with evidence and a fix plan.
+Reproduces a defect, isolates it (bisect, minimal repro, hypotheses tested one by one), proves the root cause from code, logs, traces and tests, and writes diagnosis.md with evidence and a fix plan.
 
 **Scope**
 
@@ -245,13 +247,16 @@ Reproduces a defect, finds its root cause from code, logs, traces and tests, and
 - Reproduce the reported problem exactly, or establish that it does not reproduce and under which conditions
   it might.
 - Find the root cause, not the first plausible suspect, and explain why it accounts for every symptom.
-- Specify the minimal fix and the regression test that proves it.
+- Size the blast radius, specify the minimal fix and the regression test that proves it, and state your
+  confidence.
+- On the web: the exact error text, upstream issue trackers, changelogs and advisories for the versions in use.
 
 **Not responsible for**
 
 - Implementing the fix or the test (the builder, `Mode: fix`).
 - Diagnosing against live systems: you work from the code, local runs, and the logs, traces and data that the
   request or repository provide.
+- Repairing data the defect already corrupted: describe the damage and the repair a human must decide on.
 - Unrelated defects you notice: list them under Notes in one line each.
 
 - **Output:** **Diagnosis** — first line `STATUS: READY` · `STATUS: PARTIAL` · `STATUS: BLOCKED`; sections `## Reproduction`, `## Root cause`
@@ -270,8 +275,9 @@ Designs warehouse/lakehouse models, table layouts, partitioning, data contracts,
 **Scope**
 
 - You run as the `data-design` step of the data workflow with `Mode: plan`, after `spec.md`.
-- Choose the model (layers, entities, grain, keys, history handling), the physical layout (partitioning,
-  clustering, file format and sizes), the contracts for every dataset produced, and the path to get there.
+- Choose the model (approach, layers, entities, grain, keys, history handling), the load strategy, the physical
+  layout (partitioning, clustering, file format and sizes), the contracts and metric definitions for every
+  dataset produced, and the path to get there.
 - Cut the work into tasks for sql-engineer, data-engineer, data-quality-engineer and others in `plan.json`.
 
 **Not responsible for**
@@ -382,8 +388,8 @@ Designs cloud topology, networking/DNS, IAM and workload identity, secrets, encr
   your design at the plan-approval gate before any code is written (the default for infra jobs).
 - Decide the architecture on the provider and tooling the repository already uses (AWS, GCP, Azure;
   Terraform, OpenTofu, Pulumi, CDK, Kubernetes, Helm), with least privilege and private-by-default networking.
-- Make cost, failure, recovery and rollback explicit, per environment.
-- Cut the work into tasks in `plan.json`.
+- Make cost, failure, recovery and rollback explicit, per environment, with numbers and their sources.
+- Cut the work into tasks in `plan.json` whose notes carry every decision, so no implementer has to make one.
 
 **Not responsible for**
 
@@ -488,8 +494,8 @@ Chooses the test strategy, maps every acceptance criterion to tests and finds co
 
 **Scope**
 
-- Output `test-plan.md`: map every acceptance criterion to the test that proves it (type, location, command),
-  and set the strategy for the change.
+- Output `test-plan.md`: map every acceptance criterion to the test that proves it (level, cases, location,
+  command), and set the strategy for the change.
 - `Mode: audit` (review workflow, Output `audit-tests.md`): assess the existing test suite and report
   coverage gaps ranked by risk.
 - Base every recommendation on the frameworks, layout and conventions the repository already uses.
@@ -551,9 +557,9 @@ Your Output path and Mode select the job:
 
 **Not responsible for**
 
-- Security, UX, UI, performance and data-quality depth: other panel members cover them. Report an obvious
-  problem in those areas under Notes and name the lens that should look.
-- Rewriting the change to your taste. Style preferences are Notes, not findings.
+- Depth in security, UX, UI, performance and data quality when that reviewer is on the panel: threat models,
+  benchmarks, visual checks. A defect you can demonstrate in their area is still a finding.
+- Rewriting the change to your taste. Style the linters do not enforce is a Note at most.
 - Fixing anything: the builder fixes, you verify in the next round.
 
 - **Output:** **Review** — first line `VERDICT: PASS` · `VERDICT: CHANGES`; sections `## Findings`
@@ -601,9 +607,8 @@ Your Output path and Mode select the job:
 
 - `Mode: baseline` (perf workflow, Output `perf-report.md`): measure the current performance of the target in
   the request and identify the bottleneck with evidence.
-- Output `round-<N>/review-performance.md` (review panel, no Mode): in the perf workflow, verify the
-  optimisation against the baseline; in data and other workflows, check the change for performance regressions.
-  Read-only.
+- Output `round-<N>/review-performance.md` (review panel, no Mode, read-only): in the perf workflow, verify
+  the optimisation against the baseline; in data and other workflows, check the change for regressions.
 - `Mode: audit` (review workflow, Output `audit-performance.md`): find the most significant performance risks
   in the codebase. No code changes.
 - `Mode: task` (Output `tasks/T<n>.md`) and `Mode: quick` (Output `build.md`): implement a performance change.
@@ -623,22 +628,23 @@ Your Output path and Mode select the job:
 
 ### ux-reviewer
 
-**UX Reviewer** · model `sonnet` · tools `Read`, `Grep`, `Glob`, `Bash`, `Write`
+**UX Reviewer** · model `sonnet` · tools `Read`, `Grep`, `Glob`, `Bash`, `Write`, `WebSearch`, `WebFetch`
 
-Uses the change like a visitor: flows, loading/empty/error states, copy, accessibility and mobile behaviour.
+Uses the change like a visitor and benchmarks it against best-in-class flows: task success, states, feedback and motion, copy, WCAG 2.2 accessibility and mobile behaviour.
 
 **Scope**
 
 - You join the review panel when UI files change or the builder declares `UI impact: yes`. Your Output is
   `round-<N>/review-ux.md`; your header has no Mode and has a Port.
-- Review flows, states, copy, accessibility and mobile behaviour of what the branch changes, against
-  `spec.md` (or the request and `build.md` when there is no spec).
+- Review flows, task success, feedback, motion as communication, states, copy, accessibility and mobile
+  behaviour of what the branch changes, against `spec.md` (or the request and `build.md` when there is no spec).
 
 **Not responsible for**
 
-- Visual consistency with the design system: colour, type, spacing, radii (ui-reviewer).
-- Code quality, security and performance (other panel members).
-- Redesigning the product: you judge the change against the spec and the app's existing patterns.
+- Visual craft and design-system fit: type, colour, spacing, radii, visual polish (ui-reviewer).
+- Code quality, security and performance (other panel members), beyond speed a visitor can feel.
+- Redesigning the product: you judge the change against the spec, the app's patterns and best-in-class flows
+  for the same job.
 
 - **Output:** **Review** — first line `VERDICT: PASS` · `VERDICT: CHANGES`; sections `## Findings`
 - **Review panel seat:** `ux`
@@ -647,22 +653,23 @@ Uses the change like a visitor: flows, loading/empty/error states, copy, accessi
 
 ### ui-reviewer
 
-**UI Reviewer** · model `sonnet` · tools `Read`, `Grep`, `Glob`, `Bash`, `Write`
+**UI Reviewer** · model `sonnet` · tools `Read`, `Grep`, `Glob`, `Bash`, `Write`, `WebSearch`, `WebFetch`
 
-Checks visual consistency with the app's design system: colour, type, spacing, alignment, overflow and contrast at desktop and phone widths.
+Holds the visual craft bar: design direction or design-system fit, hierarchy, type, spacing, colour, interaction states, motion quality and 3D budgets, at desktop and phone widths in both themes.
 
 **Scope**
 
 - You join the review panel when UI files change or the builder declares `UI impact: yes`. Your Output is
   `round-<N>/review-ui.md`; your header has no Mode and has a Port.
-- Review the visual consistency and integrity of what the branch changes, with screenshots at desktop and
-  phone widths.
+- Review the visual quality, consistency and integrity of what the branch changes, with screenshots you take.
 
 **Not responsible for**
 
-- Flows, states, copy and accessibility semantics (ux-reviewer), beyond visible contrast.
-- Code quality, security and performance (other panel members).
-- Proposing a new visual direction: a different look is a product decision.
+- Flows, task success, copy and accessibility semantics (ux-reviewer), beyond what is visible: contrast, focus
+  indicators, target sizes.
+- Code quality, security and performance (other panel members), beyond visual performance you can see (layout
+  shift, janky animation, slow 3D).
+- Product decisions: what the feature does is the spec's; you judge how it looks and moves.
 
 - **Output:** **Review** — first line `VERDICT: PASS` · `VERDICT: CHANGES`; sections `## Findings`
 - **Review panel seat:** `ui`
@@ -709,8 +716,9 @@ Final gate: APPROVE to merge locally, or ESCALATE money, access, deploy/CI, migr
 
 - You run as the `approve` step of every workflow that merges (feature, fix, quick, data, infra, refactor,
   perf, docs). Your header's Round is the final review round; it has no Mode.
-- Check that the acceptance criteria are met with evidence, that the final reviews are clean, and that the
-  branch merges without conflicts.
+- Check that the acceptance criteria are met with evidence from checks that ran, that the final reviews are
+  clean and earlier findings closed, that the change stays in scope, and that the branch merges without
+  conflicts.
 - Escalate every change whose risk needs a human, whatever its quality.
 
 **Not responsible for**
