@@ -105,17 +105,28 @@ type World = {
   fills: string[]
   views: unknown[]
   opened: unknown[]
+  copies: string[]
+  spawns: (readonly string[])[]
 }
 
-type WorldOptions = { run?: { exitCode: number; stdout: string; stderr: string } }
+type WorldOptions = {
+  run?: { exitCode: number; stdout: string; stderr: string }
+  runThrows?: string
+  failReads?: number // the first N file reads fail, as a transient error or a file over 4 MiB would
+  notifyDelayMs?: number // a person's Notification hooks can make notify slow
+  viewDeny?: string
+  draft?: string
+  spawn?: { stream: 'stdout' | 'stderr'; text: string }[] | 'fail'
+}
 const RUN_OK = { exitCode: 0, stdout: '{"id": "m1"}', stderr: '' }
 
 // Every call the mod makes on `$` lands on one of these: the kit's bottom answers `{ value }`.
 function world(on: On, files: Record<string, string>, opts: WorldOptions = {}): World {
   const w: World = {
     files: new Map(Object.entries(files)), touch: () => undefined,
-    runs: [], toasts: [], notices: [], statuses: [], fills: [], views: [], opened: [],
+    runs: [], toasts: [], notices: [], statuses: [], fills: [], views: [], opened: [], copies: [], spawns: [],
   }
+  let failReads = opts.failReads ?? 0
   const mtimes = new Map<string, number>([...w.files.keys()].map((k) => [k, 1]))
   w.touch = (path, text) => { w.files.set(path, text); mtimes.set(path, (mtimes.get(path) ?? 0) + 1) }
   mock.env(on, { HOME: '/home/me' })
@@ -127,6 +138,10 @@ function world(on: On, files: Record<string, string>, opts: WorldOptions = {}): 
     return { value: { kind: 'file' as const, size: w.files.get(e.path)!.length, mtimeMs: mtimes.get(e.path) ?? 1, isLink: false } }
   })
   on('fs.read', ($, e) => {
+    if (failReads > 0) {
+      failReads -= 1
+      throw new Error('EIO: read failed')
+    }
     const text = w.files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
     return { value: text }
@@ -135,16 +150,29 @@ function world(on: On, files: Record<string, string>, opts: WorldOptions = {}): 
   on('agent.list', () => ({ value: [{ id: 'agent-sec', status: 'running', description: 'review', type: 'factory:security-engineer' }] }))
   on('process.run', ($, e) => {
     w.runs.push(e.argv)
+    if (opts.runThrows) throw new Error(opts.runThrows)
     return { value: { ...(opts.run ?? RUN_OK), isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('ui.status', ($, e) => { w.statuses.push(e.text); return { value: undefined } })
   on('ui.toast', ($, e) => { w.toasts.push(e.text); return { value: undefined } })
-  on('ui.notify', ($, e) => { w.notices.push(e.text); return { value: { isSent: true, channel: 'terminal_bell' } } })
+  on('ui.notify', async ($, e) => {
+    w.notices.push(e.text)
+    if (opts.notifyDelayMs) await $.clock.sleep(opts.notifyDelayMs)
+    return { value: { isSent: true, channel: 'terminal_bell' } }
+  })
+  on('ui.copy', ($, e) => { w.copies.push(e.text); return { value: { isCopied: true } } })
+  on('prompt.read', () => ({ value: { text: opts.draft ?? '', cursor: 0 } }))
+  on('process.spawn', async function* ($, e) {
+    w.spawns.push(e.argv)
+    if (opts.spawn === 'fail') throw new Error('python3: not found')
+    for (const piece of opts.spawn ?? []) yield piece
+    return { value: { code: 0, signal: null } }
+  })
   on('ui.log', () => ({ value: undefined }))
   on('ui.open', ($, e) => { w.opened.push(e); return { value: { isPlaced: true } } })
   on('ui.focus', () => ({}))
-  on('ui.view', ($, e) => { w.views.push(e); return { value: {} } })
+  on('ui.view', ($, e) => { w.views.push(e); return { value: opts.viewDeny ? { deny: opts.viewDeny } : {} } })
   on('prompt.fill', ($, e) => { w.fills.push(e.text); return { isFilled: true } })
   // What the engine draws when the mod hands a site on (the band with nothing to say): nothing.
   on('ui.render', ($, e) => { const { Box } = $.ui.resolve(e); return <Box /> })
@@ -273,5 +301,100 @@ describe('board', () => {
     await ui.input({ key: 'msg', text: 'hello' })
     expect(w.toasts.at(-1)).toBe('Factory: message not sent: error: no such step')
     expect(await ui.find({ key: 'msg' })).toBeDefined()
+  })
+})
+
+describe('robustness', () => {
+  test('a failed first read does not stop polling', { options: { factoryctl: CTL } }, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, STATE, { failReads: 2 })
+    await start($)
+    expect(w.statuses).toEqual([])
+    await clock.advance(2100)
+    await clock.advance(2100)
+    expect(w.statuses.at(-1)).toMatch(/^factory ▸ 1 needs you/)
+  })
+
+  test('a slow notification does not make the next tick announce again', { options: { factoryctl: CTL } }, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, { ...STATE, [`${REPO}/.factory/index.json`]: index(RUNNING) }, { notifyDelayMs: 7000 })
+    await start($)
+    w.touch(`${REPO}/.factory/index.json`, index(RUNNING, ESCALATED))
+    for (let i = 0; i < 6; i++) await clock.advance(2100)
+    expect(w.notices).toEqual(['006 escalated by the approver: Show reading time'])
+    expect(w.toasts.filter((x) => x.includes('escalated'))).toHaveLength(1)
+  })
+
+  test('several changes in one poll go into one toast', { options: { factoryctl: CTL } }, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, { ...STATE, [`${REPO}/.factory/index.json`]: index(RUNNING) })
+    await start($)
+    w.touch(`${REPO}/.factory/index.json`, index({ ...RUNNING, status: 'merged' }, ESCALATED))
+    await clock.advance(2100)
+    expect(w.toasts).toHaveLength(1)
+    expect(w.toasts[0]).toMatch(/004 merged.*006 escalated/)
+  })
+
+  test('a tell that cannot start says so and keeps the message box', { options: { factoryctl: CTL } }, async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const w = world(on, STATE, { runThrows: 'spawn python3 ENOENT' })
+    await start($)
+    const ui = await $.ui.mount({ plugin: 'factory-live', surface: 'terminal', component: 'Pane', requestId: 'factory', props: PANE_PROPS(100) })
+    await ui.press({ key: 'msg:004-rate-limit-signup-form/review.r2/security' })
+    await ui.input({ key: 'msg', text: 'hello' })
+    expect(w.toasts.at(-1)).toMatch(/^Factory: message not sent: /)
+    expect(await ui.find({ key: 'msg' })).toBeDefined()
+  })
+
+  test('Watch says why when the transcript cannot be shown', { options: { factoryctl: CTL } }, async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const w = world(on, STATE, { viewDeny: 'no agent holds the id' })
+    await start($)
+    const ui = await $.ui.mount({ plugin: 'factory-live', surface: 'terminal', component: 'Pane', requestId: 'factory', props: PANE_PROPS(100) })
+    await ui.press({ key: 'watch:004-rate-limit-signup-form/review.r2/security' })
+    expect(w.toasts.at(-1)).toBe("Cannot open that agent's transcript: no agent holds the id")
+  })
+
+  test('a draft in the prompt is never overwritten', { options: { factoryctl: CTL } }, async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const w = world(on, STATE, { draft: 'half-written thought' })
+    await start($)
+    const ui = await $.ui.mount({ plugin: 'factory-live', surface: 'terminal', component: 'Pane', requestId: 'factory', props: PANE_PROPS(100) })
+    await ui.press({ key: 'fill:006-reading-time' })
+    expect(w.fills).toEqual([])
+    expect(w.copies).toEqual(['/factory approve 006-reading-time'])
+  })
+
+  test('the board shows a way back from an agent transcript', { options: { factoryctl: CTL } }, async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const w = world(on, STATE)
+    await start($)
+    const ui = await $.ui.mount({ plugin: 'factory-live', surface: 'terminal', component: 'Pane', requestId: 'factory',
+      props: { ...PANE_PROPS(100), view: { agentId: 'agent-sec' } } })
+    await ui.press({ key: 'back' })
+    expect(w.views.at(-1)).toEqual({})
+  })
+})
+
+describe('console', () => {
+  test('starts once, reads an address split across pieces, and shows it', { options: { factoryctl: CTL } }, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, STATE, { spawn: [{ stream: 'stdout', text: '{"url": "http://127.0.0.1:5' },
+      { stream: 'stdout', text: '555/", "repo": "x"}\n' }] })
+    await start($)
+    await $.command.run({ command: 'factory-console', args: '' } as never)
+    await $.command.run({ command: 'factory-console', args: '' } as never)
+    await clock.settle()
+    expect(w.spawns.length).toBe(1)
+    expect(w.toasts).toContain('Factory Console: http://127.0.0.1:5555/')
+  })
+
+  test('a console that cannot start says why', { options: { factoryctl: CTL } }, async ($, on) => {
+    const clock = mock.clock(on, { now: 0 })
+    const w = world(on, STATE, { spawn: 'fail' })
+    await start($)
+    await $.command.run({ command: 'factory-console', args: '' } as never)
+    await clock.settle()
+    expect(w.toasts.some((x) => x.startsWith('Factory Console could not start'))).toBe(true)
   })
 })

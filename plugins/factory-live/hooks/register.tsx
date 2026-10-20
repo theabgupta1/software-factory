@@ -42,6 +42,8 @@ const live$ = {
   indexMtime: -1,
   agentsMtime: -1,
   ticks: 0,
+  busy: false, // one refresh at a time: a tick that finds one running is skipped
+  consoleStarting: false,
 }
 
 export const register: Register = (on, options) => {
@@ -51,19 +53,25 @@ export const register: Register = (on, options) => {
 
   // ---- lifecycle --------------------------------------------------------------------------------------
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'factory-board', description: 'Open the software factory board: jobs that need you, agents at work, and messages to them' })
-    await $.command.register({ name: 'factory-console', description: 'Start the Factory Console (web UI) for this repository and show its address' })
-    live$.ctl = await findFactoryctl($)
+    // Both commands touch no turn state, so they run at once even while agents are working.
+    await $.command.register({ name: 'factory-board', immediate: true,
+      description: 'Open the software factory board: jobs that need you, agents at work, and messages to them' })
+    await $.command.register({ name: 'factory-console', immediate: true,
+      description: 'Start the Factory Console (web UI) for this repository and show its address' })
+    // A fresh load means any console this module started earlier is gone with the old module.
+    await update($, consoleUrl, () => null)
+    // The timer first: a failed first read must not leave the session without polling.
+    $.clock.every(POLL_MS, () => { void tick($) })
+    live$.ctl = await findFactoryctl($).catch(() => null)
     if (live$.ctl) await loadRoster($, live$.ctl)
-    await refresh($)
-    $.clock.every(POLL_MS, () => { void refreshQuietly($) })
+    await refreshQuietly($)
     return next(e)
   })
 
   on('command.run', { command: 'factory-board' }, async ($) => {
     if (!live$.repo) live$.repo = await findRepo($)
     if (!live$.repo) return { text: 'No software factory in this repository yet. Start a job with /factory <what you want>.' }
-    await refresh($)
+    await refreshQuietly($)
     await openBoard($)
     return { text: 'Factory board opened.' }
   })
@@ -86,7 +94,7 @@ export const register: Register = (on, options) => {
         <Text color="warning" bold>◆ {attn.length === 1 ? 'A factory job needs you' : `${attn.length} factory jobs need you`}</Text>
         <Text dimColor wrap="truncate-end">{shortId(first.id)} {label}: {first.title}</Text>
         {cmd ? <Button key="fill" label={cmd.length > 40 ? `${cmd.slice(0, 39)}…` : cmd} hotkey="f" variant="primary"
-          onPress={() => { void $.prompt.fill({ text: cmd }) }} /> : null}
+          onPress={() => { void fillPrompt($, cmd) }} /> : null}
         <Button key="board" label="Board" hotkey="b" onPress={() => { void openBoard($) }} />
         <Button key="hide" label="Hide" onPress={() => { void update($, bandHidden, () => sig) }} />
       </Box>
@@ -115,7 +123,8 @@ async function findFactoryctl($: $): Promise<string | null> {
   // An installed marketplace copy sits at <cache>/<marketplace>/<plugin>/<version>: look beside it too.
   const grand = root.replace(/\/+$/, '').replace(/\/[^/]+$/, '').replace(/\/[^/]+$/, '')
   try {
-    const versions = (await $.fs.list(`${grand}/factory`)).filter((v) => v.kind === 'dir').map((v) => v.name).sort().reverse()
+    const versions = (await $.fs.list(`${grand}/factory`)).filter((v) => v.kind === 'dir').map((v) => v.name)
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
     for (const v of versions) candidates.push(`${grand}/factory/${v}/bin/factoryctl`)
   } catch { /* not a marketplace install */ }
   const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
@@ -136,10 +145,22 @@ async function loadRoster($: $, ctlPath: string) {
 }
 
 async function refreshQuietly($: $) {
+  if (live$.busy) return
+  live$.busy = true
   try {
     await refresh($)
   } catch (err) {
     $.ui.log(`factory-live: ${String(err)}`, { to: 'debug' })
+  } finally {
+    live$.busy = false
+  }
+}
+
+async function tick($: $) {
+  await refreshQuietly($)
+  // Ages on the board ("12m") are drawn from the clock; redraw every 30 s while agents are at work.
+  if (live$.ticks % 15 === 0 && (live$.lastJobs ?? []).some((j) => j.running_detail.length)) {
+    $.ui.invalidate('ui.render')
   }
 }
 
@@ -159,15 +180,18 @@ async function refresh($: $) {
     return
   }
   if (mtime !== live$.indexMtime) {
-    live$.indexMtime = mtime
     const jobs = parseIndex(await $.fs.read(index))
-    for (const t of transitions(live$.lastJobs, jobs)) {
-      $.ui.toast(`Factory: ${t.text}`)
-      if (live$.notify && t.kind === 'attention') {
-        await $.ui.notify(t.text, { title: 'Software factory needs you' }).catch(() => undefined)
-      }
+    live$.indexMtime = mtime // only once the read succeeded, so a failed read is retried next tick
+    const news = transitions(live$.lastJobs, jobs)
+    live$.lastJobs = jobs // before any slow call, so nothing is announced twice
+    if (news.length) {
+      // A plugin's toast replaces its previous one, so several changes go into one.
+      $.ui.toast(`Factory: ${news.map((n) => n.text).join(' · ')}`)
     }
-    live$.lastJobs = jobs
+    const needs = news.filter((n) => n.kind === 'attention')
+    if (live$.notify && needs.length) {
+      await $.ui.notify(needs.map((n) => n.text).join('\n'), { title: 'Software factory needs you' }).catch(() => undefined)
+    }
     const readAt = await $.clock.now()
     await update($, snapshot, () => ({ repo, jobs, readAt, error: null }))
     if (live$.showStatus) $.ui.status(statusLine(jobs))
@@ -196,8 +220,14 @@ async function tell($: $, to: FactoryLiveTarget, text: string) {
     $.ui.toast('Factory: factoryctl was not found; set the factoryctl option of factory-live')
     return
   }
-  const res = await $.process.run(['python3', live$.ctl, '--repo', live$.repo, 'tell', to.job, '--step', to.step, '--', body],
-    { timeoutMs: 15000 })
+  let res
+  try {
+    res = await $.process.run(['python3', live$.ctl, '--repo', live$.repo, 'tell', to.job, '--step', to.step, '--', body],
+      { timeoutMs: 15000 })
+  } catch (err) {
+    $.ui.toast(`Factory: message not sent: ${String(err).slice(0, 200)}`)
+    return
+  }
   if (res.exitCode === 0) {
     $.ui.toast(`Sent to ${to.title}: it reads it at its next tool call`)
     await update($, target, () => null)
@@ -214,23 +244,66 @@ async function openBoard($: $) {
 async function startConsole($: $) {
   const known = await read($, consoleUrl)
   if (known) return { text: `The Factory Console is running at ${known}` }
+  if (live$.consoleStarting) return { text: 'The Factory Console is starting; its address appears in a moment.' }
   if (!live$.repo) live$.repo = await findRepo($)
   const repo = live$.repo
   const ctl = live$.ctl
   if (!ctl || !repo) return { text: 'factoryctl or a factory repository was not found, so the console cannot start here.' }
+  live$.consoleStarting = true
   // The server lives as long as this module: leaving the loop (or a reload) stops it.
   void (async () => {
-    for await (const piece of $.process.spawn({ argv: ['python3', ctl, '--repo', repo, 'serve'] })) {
-      const m = piece.stream === 'stdout' ? piece.text.match(/"url":\s*"([^"]+)"/) : null
-      if (m?.[1]) {
-        const url = m[1]
-        await update($, consoleUrl, () => url)
-        $.ui.toast(`Factory Console: ${url}`)
+    let buffered = ''
+    let tail = ''
+    try {
+      for await (const piece of $.process.spawn({ argv: ['python3', ctl, '--repo', repo, 'serve'] })) {
+        if (piece.stream !== 'stdout') {
+          tail = (tail + piece.text).slice(-400)
+          continue
+        }
+        buffered += piece.text // a line can arrive in pieces: match whole lines only
+        let nl
+        while ((nl = buffered.indexOf('\n')) >= 0) {
+          const m = buffered.slice(0, nl).match(/"url":\s*"([^"]+)"/)
+          buffered = buffered.slice(nl + 1)
+          if (m?.[1]) {
+            const url = m[1]
+            live$.consoleStarting = false
+            await update($, consoleUrl, () => url)
+            $.ui.toast(`Factory Console: ${url}`)
+          }
+        }
       }
+      if (live$.consoleStarting) $.ui.toast(`Factory Console stopped before it started: ${tail.trim() || 'no output'}`)
+    } catch (err) {
+      $.ui.toast(`Factory Console could not start: ${String(err).slice(0, 200)}`)
+    } finally {
+      live$.consoleStarting = false
+      // After an unload this module's state is gone with it; nothing to clear then.
+      await update($, consoleUrl, () => null).catch(() => undefined)
     }
-    await update($, consoleUrl, () => null)
   })()
   return { text: 'Starting the Factory Console; its address appears in a moment (and on the board).' }
+}
+
+/** Puts a command in the prompt for the person to run, without wiping a draft they are writing. */
+async function fillPrompt($: $, text: string) {
+  const box = await $.prompt.read().catch(() => null)
+  if (box && box.text.trim()) {
+    await $.ui.copy({ text }).catch(() => undefined)
+    $.ui.toast(`Your prompt has a draft, so the command was copied instead: ${text}`)
+    return
+  }
+  await $.prompt.fill({ text })
+}
+
+async function watch($: $, agentId: string) {
+  const res = await $.ui.view({ agentId })
+  if ('deny' in res && res.deny) $.ui.toast(`Cannot open that agent's transcript: ${res.deny}`)
+}
+
+async function openConsoleFromBoard($: $) {
+  const res = await startConsole($)
+  $.ui.toast(res.text)
 }
 
 // ---- drawing -----------------------------------------------------------------------------------------
@@ -267,8 +340,11 @@ async function board($: $, e: PaneEvent) {
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="row" justifyContent="space-between">
         <Text bold>Factory · {repoName}</Text>
-        <Text dimColor>{attn.length} need you · {run.length} running · {workers.length} agents</Text>
+        <Text dimColor>{attn.length} need you · {run.length} running · {workers.length} agent{workers.length === 1 ? '' : 's'}</Text>
       </Box>
+      {e.props.view?.agentId ? (
+        <Button key="back" label="Back to the main conversation" onPress={() => { void $.ui.view({}) }} />
+      ) : null}
 
       {attn.length ? (
         <Box flexDirection="column">
@@ -284,7 +360,7 @@ async function board($: $, e: PaneEvent) {
                   {cmd ? (
                     <Box flexDirection="row" gap={1}>
                       <Button key={`fill:${j.id}`} variant="primary" label={narrow ? 'Put in prompt' : `Put in prompt: ${cmd}`}
-                        onPress={() => { void $.prompt.fill({ text: cmd }) }} />
+                        onPress={() => { void fillPrompt($, cmd) }} />
                       <Button key={`copy:${j.id}`} label="Copy" onPress={(p: UiPressArgument) => { void $.ui.copy({ text: cmd, surface: p.surface }) }} />
                     </Box>
                   ) : null}
@@ -310,7 +386,7 @@ async function board($: $, e: PaneEvent) {
                   <Text bold={chosen} wrap="truncate-end">{title(w.agent)}</Text>
                   <Text dimColor wrap="truncate-end">{shortId(w.job.id)} · {stepLabel(w.step)} · {since(w.since, now)}</Text>
                 </Box>
-                {isLive ? <Button key={`watch:${w.job.id}/${w.step}`} label="Watch" onPress={() => { void $.ui.view({ agentId: agentId! }) }} /> : null}
+                {isLive ? <Button key={`watch:${w.job.id}/${w.step}`} label="Watch" onPress={() => { void watch($, agentId!) }} /> : null}
                 <Button key={`msg:${w.job.id}/${w.step}`} label={chosen ? 'Messaging' : 'Message'}
                   onPress={() => { void chooseTarget($, pick) }} />
               </Box>
@@ -353,7 +429,7 @@ async function board($: $, e: PaneEvent) {
       {!attn.length && !run.length && !done.length ? <Text dimColor>No jobs yet. Start one with /factory &lt;what you want&gt;.</Text> : null}
 
       {url ? <Text dimColor>Console: {url}</Text>
-        : <Button key="console" label="Open the web console" onPress={() => { void $.prompt.fill({ text: '/factory-console' }) }} />}
+        : <Button key="console" label="Open the web console" onPress={() => { void openConsoleFromBoard($) }} />}
     </Box>
   )
 }

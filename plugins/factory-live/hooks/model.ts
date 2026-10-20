@@ -179,7 +179,7 @@ export function statusLine(jobs: FactoryLiveJob[]): string | undefined {
     const j = run[0]!
     parts.push(`${shortId(j.id)} ${stageLabel(j)}${agents ? ` · ${agents} agent${agents === 1 ? '' : 's'} working` : ''}`)
   } else if (run.length > 1) {
-    parts.push(`${run.length} jobs running${agents ? ` · ${agents} agents working` : ''}`)
+    parts.push(`${run.length} jobs running${agents ? ` · ${agents} agent${agents === 1 ? '' : 's'} working` : ''}`)
   }
   return parts.length ? `factory ▸ ${parts.join(' · ')}` : undefined
 }
