@@ -1,0 +1,14 @@
+{
+  "name": "software-factory-dev",
+  "private": true,
+  "description": "Dev-only tooling for the Software Factory: UI tests. The factory itself has no Node dependencies.",
+  "type": "module",
+  "scripts": {
+    "test:ui": "playwright test -c tests/ui/playwright.config.js",
+    "test:js": "node --test tests/js/*.test.js"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.11.0",
+    "@playwright/test": "1.56.1"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$comment": "Artifact contracts. Every factory artifact starts with one header line from `headers`; `sections` are H2/H3 headings that must exist. factoryctl validates these on `done`, the SubagentStop hook on agent stop, and the console uses them to colour verdicts.",
+  "headers": {
+    "status": {"pattern": "^STATUS: (READY|PARTIAL|BLOCKED)$", "good": ["READY"], "warn": ["PARTIAL"], "stop": ["BLOCKED"]},
+    "build": {"pattern": "^STATUS: (READY|BLOCKED)$", "good": ["READY"], "warn": [], "stop": ["BLOCKED"]},
+    "verdict": {"pattern": "^VERDICT: (PASS|CHANGES)$", "good": ["PASS"], "warn": ["CHANGES"], "stop": []},
+    "decision": {"pattern": "^(APPROVE|ESCALATE)$", "good": ["APPROVE"], "warn": [], "stop": ["ESCALATE"]}
+  },
+  "artifacts": {
+    "spec": {"header": "status", "sections": ["Requirements", "Acceptance criteria"], "label": "Specification"},
+    "context": {"header": "status", "sections": ["Architecture", "Conventions"], "label": "Codebase context"},
+    "research": {"header": "status", "sections": ["Findings", "Recommendation", "Sources"], "label": "Research"},
+    "design": {"header": "status", "sections": ["Design"], "label": "Design"},
+    "data-design": {"header": "status", "sections": ["Model", "Contracts"], "label": "Data design"},
+    "infra-design": {"header": "status", "sections": ["Architecture", "Security"], "label": "Infrastructure design"},
+    "test-plan": {"header": "status", "sections": ["Test matrix"], "label": "Test plan"},
+    "diagnosis": {"header": "status", "sections": ["Reproduction", "Root cause"], "label": "Diagnosis"},
+    "build": {"header": "build", "sections": ["Acceptance criteria", "Validation", "Log"], "label": "Build"},
+    "task": {"header": "build", "sections": ["Changes", "Validation"], "label": "Task report"},
+    "review": {"header": "verdict", "sections": ["Findings"], "label": "Review"},
+    "audit": {"header": "status", "sections": ["Findings"], "label": "Audit"},
+    "test-report": {"header": "verdict", "sections": ["Results"], "label": "Test report"},
+    "dq-report": {"header": "verdict", "sections": ["Checks"], "label": "Data quality report"},
+    "perf-report": {"header": "status", "sections": ["Baseline"], "label": "Performance report"},
+    "ops-report": {"header": "status", "sections": ["Findings"], "label": "Operations report"},
+    "docs": {"header": "build", "sections": ["Changes"], "label": "Documentation"},
+    "report": {"header": "status", "sections": ["Summary"], "label": "Report"},
+    "decision": {"header": "decision", "sections": ["Why"], "label": "Decision"}
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "docs",
+  "title": "Documentation",
+  "icon": "book",
+  "summary": "Write or update documentation, runbooks, ADRs or release notes; reviewed for accuracy against the code.",
+  "use_when": "READMEs, architecture docs, API references, runbooks, ADRs, release notes.",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": false
+    },
+    {
+      "id": "build",
+      "kind": "build",
+      "title": "Build",
+      "agent": "docs-engineer",
+      "mode": "docs"
+    },
+    {
+      "id": "review",
+      "kind": "panel",
+      "title": "Review",
+      "always": [
+        "code"
+      ],
+      "rules": [],
+      "loop_to": "build"
+    },
+    {
+      "id": "approve",
+      "kind": "approve",
+      "title": "Approve",
+      "agent": "approver",
+      "output": "decision.md",
+      "artifact": "decision"
+    },
+    {
+      "id": "merge",
+      "kind": "merge",
+      "title": "Merge"
+    }
+  ]
+}

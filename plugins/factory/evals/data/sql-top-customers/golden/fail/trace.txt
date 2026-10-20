@@ -1,0 +1,1 @@
+{"type":"tool_result","content":"CHECK FAILED: got [(\"Ada\", 1050.0)]"}

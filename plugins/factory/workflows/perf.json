@@ -1,0 +1,55 @@
+{
+  "id": "perf",
+  "title": "Performance",
+  "icon": "gauge",
+  "summary": "Measure a baseline, optimise, and prove the improvement without changing correctness.",
+  "use_when": "Slow endpoints, queries, jobs or pages; capacity work.",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "baseline",
+      "kind": "agent",
+      "title": "Baseline",
+      "agent": "performance-engineer",
+      "mode": "baseline",
+      "output": "perf-report.md",
+      "artifact": "perf-report"
+    },
+    {
+      "id": "build",
+      "kind": "build",
+      "title": "Build",
+      "agent": "builder",
+      "mode": "perf"
+    },
+    {
+      "id": "review",
+      "kind": "panel",
+      "title": "Review",
+      "always": [
+        "performance",
+        "code"
+      ],
+      "rules": [],
+      "loop_to": "build"
+    },
+    {
+      "id": "approve",
+      "kind": "approve",
+      "title": "Approve",
+      "agent": "approver",
+      "output": "decision.md",
+      "artifact": "decision"
+    },
+    {
+      "id": "merge",
+      "kind": "merge",
+      "title": "Merge"
+    }
+  ]
+}

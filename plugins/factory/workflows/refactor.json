@@ -1,0 +1,106 @@
+{
+  "id": "refactor",
+  "title": "Refactor",
+  "icon": "refactor",
+  "summary": "Map the code, plan a behaviour-preserving refactor, pin behaviour with characterisation tests, refactor, review and merge.",
+  "use_when": "Legacy modernisation, tech-debt reduction, restructuring without behaviour change.",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "context",
+      "kind": "agent",
+      "title": "Map codebase",
+      "agent": "codebase-analyst",
+      "output": "context.md",
+      "artifact": "context"
+    },
+    {
+      "id": "plan",
+      "kind": "agent",
+      "title": "Plan",
+      "agent": "architect",
+      "mode": "refactor",
+      "output": "design.md",
+      "artifact": "design",
+      "plan_json": true
+    },
+    {
+      "id": "plan-approval",
+      "kind": "gate",
+      "title": "Plan approval",
+      "when": {
+        "any": [
+          {
+            "size_in": [
+              "L"
+            ]
+          },
+          {
+            "policy": "require_plan_approval"
+          }
+        ]
+      },
+      "reason": "The plan is ready for your review before any code is written."
+    },
+    {
+      "id": "characterize",
+      "kind": "agent",
+      "title": "Pin behaviour",
+      "agent": "test-engineer",
+      "mode": "characterize",
+      "output": "test-report.md",
+      "artifact": "test-report",
+      "commits": true
+    },
+    {
+      "id": "build",
+      "kind": "build",
+      "title": "Build",
+      "agent": "builder",
+      "mode": "refactor"
+    },
+    {
+      "id": "review",
+      "kind": "panel",
+      "title": "Review",
+      "always": [
+        "code",
+        "security"
+      ],
+      "rules": [
+        {
+          "if": "perf",
+          "add": [
+            "performance"
+          ]
+        },
+        {
+          "if": "ui",
+          "add": [
+            "ux",
+            "ui"
+          ]
+        }
+      ],
+      "loop_to": "build"
+    },
+    {
+      "id": "approve",
+      "kind": "approve",
+      "title": "Approve",
+      "agent": "approver",
+      "output": "decision.md",
+      "artifact": "decision"
+    },
+    {
+      "id": "merge",
+      "kind": "merge",
+      "title": "Merge"
+    }
+  ]
+}

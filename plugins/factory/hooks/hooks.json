@@ -1,0 +1,32 @@
+{
+  "description": "Software Factory hooks: command guard, agent spawn telemetry, mid-run console messages, output contract checks, a continuation guard for the orchestrator, and a one-line attention notice at session start. All are silent outside factory work.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/run.py\" pre-tool-use", "timeout": 10}]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/run.py\" post-tool-use", "timeout": 10}]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/run.py\" subagent-stop", "timeout": 20}]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/run.py\" stop", "timeout": 10}]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/run.py\" session-start", "timeout": 10}]
+      }
+    ]
+  }
+}

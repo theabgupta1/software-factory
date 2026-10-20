@@ -1,0 +1,10 @@
+{
+  "tasks": [
+    {"id": "T1", "agent": "backend-engineer", "title": "Rate limit the signup endpoint", "depends_on": [],
+     "owns": ["api/**"], "acceptance": ["AC1", "AC2"]},
+    {"id": "T2", "agent": "frontend-engineer", "title": "Show the limit message on 429", "depends_on": ["T1"],
+     "owns": ["web/src/**"], "acceptance": ["AC3"]},
+    {"id": "T3", "agent": "test-engineer", "title": "Tests for the limit and the message", "depends_on": ["T1", "T2"],
+     "owns": ["api/tests/**", "web/src/**/*.test.tsx"], "acceptance": ["AC4"]}
+  ]
+}

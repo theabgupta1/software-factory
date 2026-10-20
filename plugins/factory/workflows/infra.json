@@ -1,0 +1,83 @@
+{
+  "id": "infra",
+  "title": "Infrastructure",
+  "icon": "cloud",
+  "summary": "Design and implement infrastructure as code with static validation and a reviewed plan. Never applies: a human applies after approval.",
+  "use_when": "Terraform/IaC, Kubernetes, CI/CD, networking, IAM, observability changes.",
+  "escalate_always": true,
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "spec",
+      "kind": "agent",
+      "title": "Specify",
+      "agent": "product-analyst",
+      "output": "spec.md",
+      "artifact": "spec"
+    },
+    {
+      "id": "infra-design",
+      "kind": "agent",
+      "title": "Infra design",
+      "agent": "cloud-architect",
+      "mode": "plan",
+      "output": "infra-design.md",
+      "artifact": "infra-design",
+      "plan_json": true
+    },
+    {
+      "id": "plan-approval",
+      "kind": "gate",
+      "title": "Plan approval",
+      "when": {
+        "any": [
+          {
+            "size_in": [
+              "L"
+            ]
+          },
+          {
+            "policy": "require_plan_approval"
+          }
+        ]
+      },
+      "reason": "The plan is ready for your review before any code is written."
+    },
+    {
+      "id": "build",
+      "kind": "build",
+      "title": "Build",
+      "agent": "builder",
+      "mode": "infra"
+    },
+    {
+      "id": "review",
+      "kind": "panel",
+      "title": "Review",
+      "always": [
+        "security",
+        "code"
+      ],
+      "rules": [],
+      "loop_to": "build"
+    },
+    {
+      "id": "approve",
+      "kind": "approve",
+      "title": "Approve",
+      "agent": "approver",
+      "output": "decision.md",
+      "artifact": "decision"
+    },
+    {
+      "id": "merge",
+      "kind": "merge",
+      "title": "Merge"
+    }
+  ]
+}

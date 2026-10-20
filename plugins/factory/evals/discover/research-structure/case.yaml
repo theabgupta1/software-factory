@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: research-structure
+description: The researcher answers a technical question in its contract's shape and separates verified facts from assumptions, citing sources or saying it could not.
+tags: [discover, agent]

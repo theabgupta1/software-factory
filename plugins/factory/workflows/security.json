@@ -1,0 +1,30 @@
+{
+  "id": "security",
+  "title": "Security audit",
+  "icon": "shield",
+  "summary": "Assess authentication, authorisation, secrets, injection risks and dependencies; deliver severity-rated findings.",
+  "use_when": "Security assessments, dependency audits, pre-release security checks.",
+  "rework_to": "audit",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "audit",
+      "kind": "agent",
+      "title": "Audit",
+      "agent": "security-engineer",
+      "mode": "audit",
+      "output": "security-audit.md",
+      "artifact": "audit"
+    },
+    {
+      "id": "deliver",
+      "kind": "deliver",
+      "title": "Deliver"
+    }
+  ]
+}

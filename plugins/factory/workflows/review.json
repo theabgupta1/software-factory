@@ -1,0 +1,73 @@
+{
+  "id": "review",
+  "title": "Codebase review",
+  "icon": "scan",
+  "summary": "Audit an existing codebase for correctness, security, performance and test gaps, then synthesise a prioritised improvement plan.",
+  "use_when": "Assessing a codebase, preparing a refactor, due diligence, tech-debt triage.",
+  "rework_to": "synthesis",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "context",
+      "kind": "agent",
+      "title": "Map codebase",
+      "agent": "codebase-analyst",
+      "output": "context.md",
+      "artifact": "context"
+    },
+    {
+      "id": "audit",
+      "kind": "parallel",
+      "title": "Audit",
+      "members": [
+        {
+          "key": "code",
+          "agent": "code-reviewer",
+          "mode": "audit",
+          "output": "audit-code.md",
+          "artifact": "audit"
+        },
+        {
+          "key": "security",
+          "agent": "security-engineer",
+          "mode": "audit",
+          "output": "audit-security.md",
+          "artifact": "audit"
+        },
+        {
+          "key": "performance",
+          "agent": "performance-engineer",
+          "mode": "audit",
+          "output": "audit-performance.md",
+          "artifact": "audit"
+        },
+        {
+          "key": "tests",
+          "agent": "test-architect",
+          "mode": "audit",
+          "output": "audit-tests.md",
+          "artifact": "audit"
+        }
+      ]
+    },
+    {
+      "id": "synthesis",
+      "kind": "agent",
+      "title": "Synthesise",
+      "agent": "architect",
+      "mode": "synthesis",
+      "output": "report.md",
+      "artifact": "report"
+    },
+    {
+      "id": "deliver",
+      "kind": "deliver",
+      "title": "Deliver"
+    }
+  ]
+}

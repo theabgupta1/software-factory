@@ -1,0 +1,30 @@
+{
+  "name": "factory-live",
+  "version": "2.0.0",
+  "description": "The software factory inside Claude Code: a status line, a band when a job needs you, notifications, and a /factory-board pane where you watch agents (robot avatars in their own colours) and message them mid-run. Needs the factory plugin.",
+  "author": { "name": "Software Factory contributors" },
+  "license": "MIT",
+  "repository": "https://github.com/theabgupta1/software-factory",
+  "keywords": ["factory", "agents", "orchestration", "dashboard"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "notify": {
+      "type": "boolean",
+      "title": "Notify when a job needs you",
+      "description": "Raise a native notification when a factory job escalates, waits for plan approval or is blocked.",
+      "default": true
+    },
+    "statusLine": {
+      "type": "boolean",
+      "title": "Factory status line",
+      "description": "Show what the factory is doing under the prompt.",
+      "default": true
+    },
+    "factoryctl": {
+      "type": "string",
+      "title": "factoryctl path",
+      "description": "Absolute path to factoryctl, when it is not installed beside this plugin.",
+      "default": ""
+    }
+  }
+}

@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: iac-secure-bucket
+description: The iac-engineer writes Terraform for a private, encrypted, versioned log bucket, validates it if it can, and never applies.
+tags: [infra, agent]

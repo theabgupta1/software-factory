@@ -1,0 +1,83 @@
+{
+  "id": "data",
+  "title": "Data engineering",
+  "icon": "database",
+  "summary": "Design and build SQL, ETL/ELT or Spark workloads with data-quality checks, performance review and a safe deployment plan.",
+  "use_when": "Queries, pipelines, data models, schema changes, data-quality checks, analytical performance.",
+  "stages": [
+    {
+      "id": "setup",
+      "kind": "setup",
+      "title": "Set up worktree",
+      "install": true
+    },
+    {
+      "id": "spec",
+      "kind": "agent",
+      "title": "Specify",
+      "agent": "product-analyst",
+      "output": "spec.md",
+      "artifact": "spec"
+    },
+    {
+      "id": "data-design",
+      "kind": "agent",
+      "title": "Data design",
+      "agent": "data-architect",
+      "mode": "plan",
+      "output": "data-design.md",
+      "artifact": "data-design",
+      "plan_json": true
+    },
+    {
+      "id": "plan-approval",
+      "kind": "gate",
+      "title": "Plan approval",
+      "when": {
+        "any": [
+          {
+            "size_in": [
+              "L"
+            ]
+          },
+          {
+            "policy": "require_plan_approval"
+          }
+        ]
+      },
+      "reason": "The plan is ready for your review before any code is written."
+    },
+    {
+      "id": "build",
+      "kind": "build",
+      "title": "Build",
+      "agent": "builder"
+    },
+    {
+      "id": "review",
+      "kind": "panel",
+      "title": "Review",
+      "always": [
+        "code",
+        "security",
+        "data-quality",
+        "performance"
+      ],
+      "rules": [],
+      "loop_to": "build"
+    },
+    {
+      "id": "approve",
+      "kind": "approve",
+      "title": "Approve",
+      "agent": "approver",
+      "output": "decision.md",
+      "artifact": "decision"
+    },
+    {
+      "id": "merge",
+      "kind": "merge",
+      "title": "Merge"
+    }
+  ]
+}
