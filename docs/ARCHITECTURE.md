@@ -27,6 +27,7 @@ at a time and reports back. That is what makes the factory resumable, testable w
 |---|---|---|
 | `/factory` skill | `plugins/factory/skills/factory/` | Intake (workflow, size, one-line why), the action loop, the commands. Short on purpose: no orchestration rules |
 | Agents | `plugins/factory/agents/` (generated from `agents-src/` + `protocol/`) | 25 specialists with uniform contracts ([AGENTS.md](AGENTS.md)) |
+| Playbooks | `plugins/factory/playbooks/` | Deep, shared practice an agent reads on demand; the roster's `playbooks` field decides who, and the engine names the file in the prompt. `design.md`: references (Mobbin, Dribbble, Awwwards…), design direction, craft bar, motion, 3D, accessibility and performance budgets, critique loop |
 | Engine | `plugins/factory/lib/factory_core/` + `bin/factoryctl` | State machine, workflows, plans, panels, contracts, git, store, report |
 | Workflows | `plugins/factory/workflows/*.json` | Declarative stage lists ([WORKFLOWS.md](WORKFLOWS.md)) |
 | Contracts | `plugins/factory/contracts/artifacts.json`, `agents.json` | Output headers + required sections; the roster (domains, models, hues, review seats) |
