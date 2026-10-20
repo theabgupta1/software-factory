@@ -120,9 +120,9 @@ def instruction(kind: str, *, job: dict, stage: dict, mode: str | None, round_no
     return "Do your part of this job."
 
 
-def address_reviews(job: dict, round_no: int, round_dir: Path) -> str:
+def address_reviews(job: dict, round_no: int, round_dir: Path, attempt: int = 1) -> str:
     return (
-        f"FACTORY-STEP job={job['id']} step=build.r{round_no}/builder attempt=1\n"
+        f"FACTORY-STEP job={job['id']} step=build.r{round_no}/builder attempt={attempt}\n"
         f"Round {round_no - 1} reviews are in {round_dir}. Address every review with VERDICT: CHANGES, commit, "
         f"and update build.md for round {round_no}."
     )

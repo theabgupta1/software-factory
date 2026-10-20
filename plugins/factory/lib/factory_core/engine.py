@@ -8,7 +8,10 @@ happens here, so the orchestrator never has to remember the rules.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+import json
 import os
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +130,17 @@ class Engine:
                     f"{job_id} was driven by another session {int(age)}s ago. If that session is gone, "
                     f"run: factoryctl resume {job_id} --force"
                 )
-            self._take_over(job)
+            if holder == self.session and not force:
+                # This session already drives the job and its agents may still be running: take nothing over
+                # (use --redeliver if it lost track of them, or --force after a restart).
+                job["lease"]["heartbeat_at"] = now_iso()
+            else:
+                self._take_over(job)
+            retry = (job.get("human") or {}).get("retry")
+            if job["status"] == "needs-human" and retry and retry in job["steps"]:
+                job["status"] = "running"
+                job["human"] = None
+                self.store.event(job, "step.retry", step=retry)
             action = self._advance(job)
             self.store.save(job)
             return action
@@ -143,7 +156,7 @@ class Engine:
             step = job["steps"].get(step_id)
             if step is None:
                 raise FactoryError(f"{job_id} has no step {step_id!r}")
-            if attempt < step["attempt"]:
+            if attempt != step["attempt"]:  # older or not yet issued: either way not this step's run
                 return {"result": "stale", "problems": [], "next": self._advance_and_save(job)}
             if step["status"] != "issued":
                 return {"result": "duplicate", "problems": [], "next": self._advance_and_save(job)}
@@ -203,19 +216,34 @@ class Engine:
             write_text_atomic(rework_file, note + "\n")
             human = job.get("human") or {}
             if human.get("kind") == "plan-approval":
+                # Re-run the last stage before the gate that actually applies to this job.
                 gate_idx = ids.index(human["stage"])
-                target = next(s["id"] for s in reversed(wf["stages"][:gate_idx]) if s["kind"] in ("agent", "parallel"))
+                target = next((s["id"] for s in reversed(wf["stages"][:gate_idx])
+                               if s["kind"] in ("agent", "parallel") and self._cond(job, s.get("when"))), ids[0])
             else:
-                target = wf.get("rework_to") or ("build" if "build" in ids else ids[-2])
+                default = wf.get("rework_to") or ("build" if "build" in ids else ids[-2])
+                stopped = job["stage"] if job["stage"] in ids else default
+                # Never jump past a stage that has not finished: restart where the job stopped if that is earlier.
+                target = stopped if ids.index(stopped) < ids.index(default) else default
             self._archive_from(job, target, reason=f"rework-{k}")
             if (job_dir / "decision.md").exists():
                 os.replace(job_dir / "decision.md", job_dir / f"decision-{k}.md")
-            stage = self._stage(job, target)
-            if stage["kind"] == "build":
-                job["round"] = max(job.get("round", 0), 0) + 1
+            build_id = next((s["id"] for s in wf["stages"] if s["kind"] == "build"), None)
+            if build_id and ids.index(target) <= ids.index(build_id) and job.get("round", 0) > 0:
+                job["round"] = job["round"] + 1  # rounds are keyed by number: a new one rebuilds from scratch
                 job["round_floor"] = job["round"] - 1
             job["rework"] = {"file": rework_file.name, "target": target, "at": now_iso()}
             job["stage"] = target
+            job["counters"]["budget_base"] = job["counters"].get("agent_runs", 0)  # a fresh agent-run budget
+            if not Path(job["worktree"]).exists():
+                # Delivered and artifact-only jobs drop their worktree: walk again from setup, which recreates it
+                # and reinstalls, then passes the finished stages up to the target.
+                setup = next((s["id"] for s in wf["stages"] if s["kind"] == "setup"), None)
+                if setup and "setup/deps" in job["steps"]:
+                    job["steps"]["setup/deps"]["status"] = "lost"
+                    job["steps"]["setup/deps"]["failures"] = 0
+                if setup:
+                    job["stage"] = setup
             job["status"] = "running"
             job["human"] = None
             job["decision"] = None
@@ -270,6 +298,13 @@ class Engine:
                 raise FactoryError(
                     f"{job['id']} is being driven by another Claude session (active {int(age)}s ago). "
                     f"Continue there, or take it over with: factoryctl resume {job['id']} --force"
+                )
+            running = [sid for sid, s in job["steps"].items() if s.get("status") == "issued"]
+            if running:
+                raise FactoryError(
+                    f"{job['id']} was driven by another Claude session that still has agents issued "
+                    f"({', '.join(running[:4])}); they may still be working. If that session is gone, take the job "
+                    f"over with: factoryctl resume {job['id']} --force"
                 )
             self._take_over(job)
             return
@@ -426,6 +461,9 @@ class Engine:
 
     def _h_parallel(self, job: dict, stage: dict):
         members = [m for m in stage["members"] if self._cond(job, m.get("when"))]
+        blocked = self._batch_blocked(job, [f"{stage['id']}/{m['key']}" for m in members])
+        if blocked:
+            return blocked
         entries, running = [], []
         for m in members:
             sid = f"{stage['id']}/{m['key']}"
@@ -476,9 +514,9 @@ class Engine:
             rework = job.get("rework") if (job.get("rework") or {}).get("target") == stage["id"] else None
             prev = self._previous_builder(job, n)
             round_dir = job_dir / f"round-{n - 1}" if n > 1 else None
-            can_message = (
+            can_message = (  # only a first attempt resumes by message; a retry is respawned with its problems
                 prev is not None and rework is None and prev.get("session") == self.session
-                and prev.get("epoch") == job["epoch"] and (step is None or step["status"] != "lost")
+                and prev.get("epoch") == job["epoch"] and step is None
             )
             if n > 1 + job.get("round_floor", 0) and can_message:
                 fallback = self._issue_agent(job, sid, stage, {**stage, "agent": agent, "output": "build.md",
@@ -489,7 +527,8 @@ class Engine:
                     return fallback
                 job["counters"]["builder_resumes"] += 1
                 pending = self.store.pending_messages(job["id"], step=sid, agent=agent)
-                message = prompts.with_extras(prompts.address_reviews(job, n, round_dir), messages=pending)
+                message = prompts.with_extras(prompts.address_reviews(job, n, round_dir, fallback["attempt"]),
+                                              messages=pending)
                 fallback["prompt"] = prompts.with_extras(fallback["prompt"], messages=pending)
                 for m in pending:
                     self.store.receipt(job["id"], m["id"], via="prompt", step=sid)
@@ -514,8 +553,6 @@ class Engine:
                                       via="respawn" if n > 1 else "spawn")
             if entry.get("kind") == "human":
                 return entry
-            if rework:
-                job.pop("rework", None)
             return self._spawn([entry])
         if step["status"] == "issued":
             return self._wait([sid])
@@ -541,6 +578,9 @@ class Engine:
                              members=[{"key": m["key"], "agent": m["agent"], "why": m["why"]} for m in members])
             self.store.event(job, "round.started", round=n)
         members = {m["key"]: m for m in job["panel"]}
+        blocked = self._batch_blocked(job, [f"review.r{n}/{key}" for key in rnd["members"]])
+        if blocked:
+            return blocked
         entries, running = [], []
         for key in rnd["members"]:
             sid = f"review.r{n}/{key}"
@@ -624,10 +664,15 @@ class Engine:
             if result.cleanup:
                 msg += f"; {result.cleanup}"
             return self._done_action(job, msg)
-        kind = "merge-busy" if result.status == "busy" else "merge-conflict"
-        hint = ("Commit or stash your changes and switch the main checkout to "
-                f"{job['base_branch']}, then approve again." if result.status == "busy"
-                else f"Resolve it on {job['branch']} in {job['worktree']} (or rework), then approve again.")
+        untracked = result.status == "failed" and "untracked working tree files" in result.message
+        kind = "merge-busy" if result.status == "busy" or untracked else "merge-conflict"
+        if untracked:
+            hint = ("Untracked files in the main checkout would be overwritten by the merge; move or delete them "
+                    "there, then approve again.")
+        elif result.status == "busy":
+            hint = f"Commit or stash your changes and switch the main checkout to {job['base_branch']}, then approve again."
+        else:
+            hint = f"Resolve it on {job['branch']} in {job['worktree']} (or rework), then approve again."
         return self._to_human(job, kind, f"Approved but not merged: {result.message}. {hint}",
                               [f"/factory approve {job['id']}", f"/factory rework {job['id']} <note>"], [])
 
@@ -642,9 +687,11 @@ class Engine:
             note = None if rm.returncode == 0 else f"kept the worktree: {(rm.stderr or rm.stdout).strip()[:200]}"
         job["status"] = "delivered"
         job["outcome"] = "branch"
-        commands = [f"git push -u origin {job['branch']}",
-                    f"gh pr create --head {job['branch']} --base {job['base_branch']} --title \"{job['title'][:70]}\" "
-                    f"--body-file .factory/jobs/{job['id']}/final-report.md"]
+        q = shlex.quote  # the person pastes these into a shell: every value is quoted
+        body = f".factory/jobs/{job['id']}/final-report.md"
+        commands = [f"git push -u origin {q(job['branch'])}",
+                    f"gh pr create --head {q(job['branch'])} --base {q(job['base_branch'])} "
+                    f"--title {q(job['title'][:70])} --body-file {q(body)}"]
         job["delivery"] = {"branch": job["branch"], "commands": commands, "at": now_iso(), "note": note}
         self.store.event(job, "job.delivered", outcome="branch", branch=job["branch"])
         self._write_report(job)
@@ -659,13 +706,27 @@ class Engine:
         return self._done_action(job, "delivered" + (f"; {note}" if note else ""))
 
     # ---- step issue & completion --------------------------------------------------------
+    def _runs_used(self, job: dict) -> int:
+        """Agent runs counted against the limit: those since the job started or was last reworked."""
+        return job["counters"]["agent_runs"] - int(job["counters"].get("budget_base", 0))
+
+    def _batch_blocked(self, job: dict, sids: list[str]) -> dict | None:
+        """Checks a parallel batch against the limits before any of it is issued, so a batch never half-starts."""
+        todo = [s for s in sids if (job["steps"].get(s) or {}).get("status") in (None, *RETRYABLE)]
+        for sid in todo:
+            if int((job["steps"].get(sid) or {}).get("failures", 0)) >= job["limits"]["max_attempts"]:
+                return self._limit_action(job, sid)
+        if todo and self._runs_used(job) + len(todo) > job["limits"]["max_agent_runs"]:
+            return self._limit_action(job)
+        return None
+
     def _record_issue(self, job: dict, sid: str, fields: dict) -> dict | None:
         limits = job["limits"]
         prev = job["steps"].get(sid) or {}
         failures = int(prev.get("failures", 0))
         if failures >= limits["max_attempts"]:
             return None
-        if fields.get("kind") != "inline" and job["counters"]["agent_runs"] >= limits["max_agent_runs"]:
+        if fields.get("kind") != "inline" and self._runs_used(job) >= limits["max_agent_runs"]:
             return None
         if fields.get("kind") != "inline":
             job["counters"]["agent_runs"] += 1
@@ -762,7 +823,9 @@ class Engine:
         return self.store.job_dir(job["id"]) / "entries" / (sid.replace("/", "__") + ".json")
 
     def _remember(self, job: dict, sid: str, entry: dict) -> None:
-        write_text_atomic(self._entry_file(job, sid), _dump(entry))
+        text = _dump(entry)
+        write_text_atomic(self._entry_file(job, sid), text)
+        job["steps"][sid]["entry_sha"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def redeliver(self, job_id: str) -> dict:
         """Re-send the spawn entries of steps that are issued but whose agents the orchestrator lost track of.
@@ -773,19 +836,24 @@ class Engine:
         with self.store.lock(job_id):
             job = self.store.load(job_id)
             self._lease(job)
+            if job["status"] != "running":  # nothing to re-send for a job that waits on a human or has ended
+                return self._finalise_action(job, self._advance_and_save(job))
             entries = []
             for sid, step in job["steps"].items():
                 if step["status"] != "issued" or step.get("kind") == "inline":
                     continue
                 path = self._entry_file(job, sid)
-                if path.exists():
-                    import json
-
-                    entries.append(json.loads(path.read_text(encoding="utf-8")))
+                text = path.read_text(encoding="utf-8") if path.exists() else None
+                if text is None or hashlib.sha256(text.encode("utf-8")).hexdigest() != step.get("entry_sha"):
+                    # Missing, or changed since the engine wrote it: never re-send it; the step is issued afresh.
+                    step["status"] = "lost"
+                    self.store.event(job, "entry.untrusted", step=sid)
+                    continue
+                entries.append(json.loads(text))
             self.store.event(job, "steps.redelivered", steps=[e["step"] for e in entries])
-            self.store.save(job)
             if not entries:
-                return self._finalise_action(job, self._advance(job))
+                return self._finalise_action(job, self._advance_and_save(job))
+            self.store.save(job)
             return self._finalise_action(job, self._spawn(entries, say=f"{job_id}: re-sending "
                                                                      + ", ".join(e["step"] for e in entries)))
 
@@ -812,8 +880,10 @@ class Engine:
             step["failures"] = int(step.get("failures", 0)) + 1
             step["problems"] = [note or "setup failed"]
             self.store.event(job, "step.failed", step=sid, note=note)
-            self._to_human(job, "blocked", f"Worktree setup failed: {note or 'no details given'}",
+            self._to_human(job, "blocked", f"Worktree setup failed: {note or 'no details given'}. Fix the cause, "
+                           "then resume to run the setup again.",
                            [f"/factory resume {job['id']}", f"/factory cancel {job['id']}"], [])
+            job["human"]["retry"] = sid
             return "invalid", step["problems"]
         if status != "ok":
             problems.append(f"the agent ended with status {status}" + (f": {note}" if note else ""))
@@ -925,9 +995,10 @@ class Engine:
                 "say": f"{job['id']} needs you ({human.get('kind', 'decision')}): {human.get('reason', '')[:200]}"}
 
     def _limit_action(self, job: dict, sid: str | None = None) -> dict:
-        runs = job["counters"]["agent_runs"]
-        if runs >= job["limits"]["max_agent_runs"]:
-            reason = f"Agent run limit reached ({runs}/{job['limits']['max_agent_runs']})."
+        runs = self._runs_used(job)
+        if sid is None or runs >= job["limits"]["max_agent_runs"]:
+            reason = (f"Agent run limit reached ({runs}/{job['limits']['max_agent_runs']} since the job started or "
+                      "was last reworked). Rework continues with a fresh budget.")
         else:
             reason = f"{sid} exhausted its {job['limits']['max_attempts']} attempts."
         return self._to_human(job, "limit", reason,

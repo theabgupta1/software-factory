@@ -104,10 +104,19 @@ factory (`factory/jobs/`) are listed read-only.
 ## Sessions, leases, resume
 
 A job is driven by one Claude session at a time. Its `lease` names the session and an `epoch`. Another session that
-calls `next` while the lease is fresh (15 minutes) is refused. `factoryctl resume <job>` takes the lease (`--force`
-when the other session may still be alive), bumps the epoch and reconciles steps left `issued`: if the output is on
-disk and valid the step is `recovered`, otherwise `lost` and re-issued. A builder whose session is gone is re-spawned
-with a continuation brief (build log, branch log, the round's reviews, the rework note) instead of messaged.
+calls `next` while the lease is fresh (15 minutes) is refused; after that it may take over only if no agents are
+issued — otherwise those agents may still be working, and it must say so explicitly with
+`factoryctl resume <job> --force`. A takeover bumps the epoch and reconciles steps left `issued`: if the output is on
+disk and valid the step is `recovered`, otherwise `lost` and re-issued. `resume` from the session that already holds
+the job takes nothing over (its agents keep running); `next --redeliver` re-sends the exact spawn entries of issued
+steps if the orchestrator lost track of them, and refuses entries that changed on disk. A builder whose session is
+gone is re-spawned with a continuation brief (build log, branch log, the round's reviews, the rework note) instead
+of messaged.
+
+**Rework** restarts at the stage the job stopped in, or at `build` if that comes first — never past a stage that did
+not finish — so a blocked spec is specified again, re-planned and re-gated. It starts a new round (rounds are keyed by
+number), keeps the rework note until the build completes (retries see it too), recreates a worktree that delivery
+removed, and gives the job a fresh agent-run budget.
 
 ## Talking to agents mid-run
 

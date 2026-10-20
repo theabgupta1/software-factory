@@ -19,6 +19,8 @@ def plugin_path(*parts: str) -> Path:
 
 
 def git(args: list[str], cwd: Path, check: bool = True, timeout: int = 60) -> subprocess.CompletedProcess:
+    if not Path(cwd).is_dir():
+        raise FactoryError(f"{cwd} does not exist (git {' '.join(args[:2])} was asked to run there)")
     try:
         proc = subprocess.run(
             ["git", *args],
