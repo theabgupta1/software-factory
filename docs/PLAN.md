@@ -8,6 +8,13 @@ factory for Claude Code. Decisions marked **fixed** came from the user.
 Built: every section below, with two deliberate changes recorded in §3 and §7 — running agents receive messages
 through the hook only (ADR 0006), and factory-live has no autopilot (ADR 0005). Results: docs/TEST-MATRIX.md.
 
+Reviewed: an adversarial engine review and a security review were run against the finished build. Every finding was
+fixed with a regression test (`tests/integration/test_review_regressions.py`, `tests/integration/test_security.py`,
+the guard tables in `tests/unit/test_hooks.py`). The security fixes: the guard reads commands like a shell
+(`guard.py`); sealed job state and messages; agents write only their own Output; git config/hooks
+fingerprinting; trust for tracked config; free text on stdin; a console key on every API call, loopback only;
+link-safe Markdown; credentials masked in telemetry. See docs/SECURITY.md for what is and is not protected.
+
 ## Fixed decisions
 
 - Nothing is installed into, and no paid model calls run in, the cloud container this was built in.

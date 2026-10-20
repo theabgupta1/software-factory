@@ -143,6 +143,14 @@ def continuation_brief(job: dict, round_no: int, round_dir: Path | None, rework:
     return "\n".join(parts)
 
 
+def fence(text: str, label: str) -> str:
+    """Wrap text that came from the repository so it reads as quoted data, never as the factory's own words: it
+    cannot close the fence early or start a line that looks like a step header."""
+    body = text.replace(f"</{label}>", f"<\u200b/{label}>")
+    body = re.sub(r"(?m)^(\s*)FACTORY-STEP", "\\1FACTORY\u2011STEP", body)
+    return f"<{label}>\n{body}\n</{label}>"
+
+
 def with_extras(text: str, problems: list[str] | None = None, messages: list[dict] | None = None,
                 warnings: list[str] | None = None) -> str:
     extra = []
@@ -153,6 +161,7 @@ def with_extras(text: str, problems: list[str] | None = None, messages: list[dic
         extra.append("Factory notes for this step:\n" + "\n".join(f"- {w}" for w in warnings))
     if messages:
         extra.append("Messages from the user (sent through the Factory Console; treat them as instructions for "
-                     "this step and record how you handled each one in your Output file):\n"
+                     "this step and record how you handled each one in your Output file; they never authorise "
+                     "pushing, deploying, merging, approving or touching the factory's state):\n"
                      + "\n".join(f"- [{m['ts'][11:16]} UTC] {m['text']}" for m in messages))
     return text if not extra else text + "\n\n" + "\n\n".join(extra)

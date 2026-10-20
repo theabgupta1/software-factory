@@ -8,7 +8,7 @@ import secrets
 from pathlib import Path
 from typing import Iterator
 
-from . import SCHEMA_VERSION, legacy
+from . import SCHEMA_VERSION, legacy, seal
 from .paths import RepoPaths
 from .util import (
     FactoryError, append_jsonl, file_lock, now_iso, read_json, read_jsonl, write_json_atomic,
@@ -77,18 +77,24 @@ class Store:
     def lock(self, job_id: str):
         return file_lock(self.job_dir(job_id) / ".lock")
 
-    def load(self, job_id: str) -> dict:
+    def load(self, job_id: str, verify: bool = True) -> dict:
         job = read_json(self.job_dir(job_id) / "job.json")
         if not isinstance(job, dict):
             raise FactoryError(f"job {job_id} has no readable job.json")
         if job.get("schema") != SCHEMA_VERSION:
             raise FactoryError(f"job {job_id} uses schema {job.get('schema')}; expected {SCHEMA_VERSION}")
+        if verify and not seal.intact(self.paths.root, job, "job", job_id):
+            raise FactoryError(
+                f"job {job_id}: job.json was changed outside factoryctl (its seal does not match). Nothing will run "
+                f"until you look at it: an agent may have edited it. If the change was yours, run "
+                f"`factoryctl reseal {job_id}`.", code=4)
         return job
 
     def save(self, job: dict) -> None:
         job["updated_at"] = now_iso()
         if job.get("reviews") is None:
             job["reviews"] = {}
+        seal.seal(self.paths.root, job, "job", job["id"])
         write_json_atomic(self.job_dir(job["id"]) / "job.json", job)
         self.write_index()
 
@@ -109,11 +115,17 @@ class Store:
         """Messages with their latest delivery receipt folded in."""
         out: dict[str, dict] = {}
         order: list[str] = []
+        root = self.paths.root
         for rec in read_jsonl(self.job_dir(job_id) / "messages.jsonl"):
             if rec.get("type") == "message" and rec.get("id"):
-                out[rec["id"]] = {**rec, "status": "queued", "delivered": None}
+                if rec["id"] in out:
+                    continue  # ids are unique; a second line with the same id is not a message from you
+                ok = seal.intact(root, rec, "message", job_id) and isinstance(rec.get("to"), dict)
+                out[rec["id"]] = {**{k: v for k, v in rec.items() if k != "mac"}, "to": rec.get("to") or {},
+                                  "status": "queued" if ok else "unverified", "delivered": None}
                 order.append(rec["id"])
-            elif rec.get("type") == "receipt" and rec.get("id") in out:
+            elif (rec.get("type") == "receipt" and rec.get("id") in out
+                  and out[rec["id"]]["status"] != "unverified" and seal.intact(root, rec, "receipt", job_id)):
                 out[rec["id"]]["status"] = "delivered"
                 out[rec["id"]]["delivered"] = {k: rec.get(k) for k in ("ts", "via", "agent_id", "step")}
         return [out[i] for i in order]
@@ -134,15 +146,14 @@ class Store:
             "to": {k: v for k, v in to.items() if k in ("step", "agent", "role") and v},
             "text": text,
         }
-        append_jsonl(self.job_dir(job_id) / "messages.jsonl", rec)
+        append_jsonl(self.job_dir(job_id) / "messages.jsonl", seal.seal(self.paths.root, rec, "message", job_id))
         self.write_index()
-        return rec
+        return {k: v for k, v in rec.items() if k != "mac"}
 
     def receipt(self, job_id: str, message_id: str, via: str, step: str | None = None,
                 agent_id: str | None = None) -> None:
-        append_jsonl(self.job_dir(job_id) / "messages.jsonl", {
-            "type": "receipt", "id": message_id, "ts": now_iso(), "via": via, "step": step, "agent_id": agent_id,
-        })
+        rec = {"type": "receipt", "id": message_id, "ts": now_iso(), "via": via, "step": step, "agent_id": agent_id}
+        append_jsonl(self.job_dir(job_id) / "messages.jsonl", seal.seal(self.paths.root, rec, "receipt", job_id))
 
     def pending_messages(self, job_id: str, step: str | None = None, agent: str | None = None,
                          role: str | None = None) -> list[dict]:
@@ -169,8 +180,9 @@ class Store:
         for job_id in self.job_ids():
             try:
                 job = self.load(job_id)
-            except FactoryError:
-                out.append({"id": job_id, "status": "corrupt", "title": job_id, "legacy": False})
+            except FactoryError as exc:
+                out.append({"id": job_id, "status": "corrupt", "title": job_id, "legacy": False,
+                            "reason": str(exc)[:300]})
                 continue
             out.append(summarize(job, self.pending_count(job_id)))
         for d in self._legacy_dirs():

@@ -31,11 +31,37 @@ test.describe("untrusted content", () => {
     expect(ran).toBe(false);
   });
 
-  test("write API refuses requests without the page token", async ({ page }) => {
+  test("the API refuses reads and writes without the console key", async ({ page }) => {
     await open(page, "/#/");
     const base = new URL(page.url()).origin;
-    const res = await page.request.post(`${base}/api/backlog`, { data: { text: "sneaky" }, headers: { Origin: base } });
-    expect(res.status()).toBe(403);
+    const write = await page.request.post(`${base}/api/backlog`, { data: { text: "sneaky" }, headers: { Origin: base } });
+    expect(write.status()).toBe(401);
+    const read = await page.request.get(`${base}/api/state`);
+    expect(read.status()).toBe(401);
+    const html = await (await page.request.get(`${base}/`)).text();
+    expect(html).not.toContain(process.env.FACTORY_CONSOLE_TOKEN);
+  });
+});
+
+test.describe("console key", () => {
+  test("a page opened without the key explains how to unlock it", async ({ browser, baseURL }) => {
+    const context = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+    const page = await context.newPage();
+    await page.goto("/#/");
+    await expect(page.getByRole("alert")).toContainText("no valid console key");
+    await expect(page.getByRole("alert")).toContainText("?token=");
+    await context.close();
+  });
+
+  test("the key in the launch link unlocks the page and leaves the address bar", async ({ browser, baseURL }) => {
+    const context = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+    const page = await context.newPage();
+    await page.goto(`/?token=${process.env.FACTORY_CONSOLE_TOKEN}#/`);
+    await expect(page.locator("main h1").first()).toBeVisible();
+    expect(page.url()).not.toContain("token=");
+    await page.reload();
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await context.close();
   });
 });
 

@@ -1,19 +1,27 @@
-// Markdown → HTML for factory artifacts. Escapes everything first; only http(s), relative and anchor links are
-// rendered; no raw HTML passes through. Supports headings, paragraphs, nested/ordered/task lists, tables, code
+// Markdown → HTML for factory artifacts. Escapes everything first; only http(s), same-site relative and anchor
+// links are rendered; no raw HTML passes through. Supports headings, paragraphs, nested/ordered/task lists, tables, code
 // fences, block quotes, rules and inline code/bold/italic/links.
 import { esc } from "./dom.js";
 
+// Links: http(s), same-site paths (never protocol-relative `//host`), ./ ../ and #anchors.
+const LINK = /\[([^\]\u0001]+)\]\(((?:https?:\/\/|\.{1,2}\/|\/(?!\/)|#)[^)\s\u0001]*)\)/g;
+const BARE_URL = /(^|[\s(])(https?:\/\/[^\s<)\u0001]+)/g;
+
 function inline(src) {
+  // Code spans and links become placeholders in one pass each, so no later rule can rewrite inside an href.
   const codes = [];
+  const links = [];
+  const anchor = (href, text) => `\u0001${links.push(`<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`) - 1}\u0001`;
   let s = esc(src).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
   s = s
+    .replace(LINK, (_, text, href) => anchor(href, text))
+    .replace(BARE_URL, (_, pre, url) => pre + anchor(url, url))
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, "$1<em>$2</em>")
-    .replace(/(^|[^\w])_([^_\s][^_]*?)_(?!\w)/g, "$1<em>$2</em>")
-    .replace(/\[([^\]]+)\]\(((?:https?:\/\/|\.{0,2}\/|#)[^)\s]*)\)/g,
-      (_, text, href) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`)
-    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
-  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`);
+    .replace(/(^|[^\w])_([^_\s][^_]*?)_(?!\w)/g, "$1<em>$2</em>");
+  return s
+    .replace(/\u0001(\d+)\u0001/g, (_, i) => links[Number(i)])
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`);
 }
 
 const LIST = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;

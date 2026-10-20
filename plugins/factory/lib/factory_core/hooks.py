@@ -12,9 +12,10 @@ import os
 import re
 from pathlib import Path
 
-from . import contracts, prompts, telemetry
-from .paths import PLUGIN_ROOT, plugin_path
-from .util import append_jsonl, file_lock, now_iso, read_json, read_jsonl, write_json_atomic
+from . import contracts, guard, prompts, seal, telemetry
+from .paths import PLUGIN_ROOT, RepoPaths, plugin_path
+from .store import Store
+from .util import append_jsonl, file_lock, now_iso, read_json, write_json_atomic
 
 ROSTER_FILE = plugin_path("contracts", "agents.json")
 AGENT_TOOLS = {"Agent", "Task"}
@@ -55,9 +56,20 @@ def _agents_map_path(state: Path) -> Path:
 
 
 def _lookup_agent(state: Path, agent_id: str | None) -> dict | None:
+    """The job and step a subagent works on, from the sealed map the spawn hook keeps (None if unknown or forged)."""
     if not agent_id:
         return None
-    return (read_json(_agents_map_path(state), default={}) or {}).get(agent_id)
+    entry = (read_json(_agents_map_path(state), default={}) or {}).get(agent_id)
+    if not isinstance(entry, dict) or not seal.intact(state.parent, entry, "agent", agent_id):
+        return None
+    return entry
+
+
+def _sealed_job(state: Path, job_id: str) -> dict | None:
+    job = read_json(_job_dir(state, job_id) / "job.json", default=None)
+    if not isinstance(job, dict) or not seal.intact(state.parent, job, "job", job_id):
+        return None
+    return job
 
 
 def _job_dir(state: Path, job_id: str) -> Path:
@@ -72,27 +84,39 @@ def _subagent_transcript(main_transcript: str | None, agent_id: str) -> str | No
 
 
 # ---- PreToolUse: command and write guard -----------------------------------------------------------
-_POLICY: list[dict] | None = None
+WRITE_TOOLS = ("Write", "Edit", "NotebookEdit", "MultiEdit")
 
 
-def _policy() -> list[dict]:
-    global _POLICY
-    if _POLICY is None:
-        data = read_json(plugin_path("guard-policy.json"), default={"rules": []})
-        _POLICY = [{**r, "rx": re.compile(r["pattern"])} for r in data.get("rules", [])]
-    return _POLICY
+def evaluate_command(command: str, **context) -> tuple[str, dict | None]:
+    """Returns ('deny'|'ask'|'allow', rule). deny wins over ask. See guard.py."""
+    return guard.evaluate(command, **context)
 
 
-def evaluate_command(command: str) -> tuple[str, dict | None]:
-    """Returns ('deny'|'ask'|'allow', rule). deny wins over ask."""
-    normalized = " ".join((command or "").split())
-    hit_ask = None
-    for rule in _policy():
-        if rule["rx"].search(normalized):
-            if rule["decision"] == "deny":
-                return "deny", rule
-            hit_ask = hit_ask or rule
-    return ("ask", hit_ask) if hit_ask else ("allow", None)
+def _own_outputs(state: Path, agent_id: str | None) -> tuple | None:
+    """Files inside .factory this agent may write: its step's Output (and plan.json when its contract says so).
+    None when the agent's step is unknown (not recorded yet); () when the record says it has nothing to write."""
+    info = _lookup_agent(state, agent_id)
+    if not info or not info.get("job"):
+        return None
+    job = _sealed_job(state, info["job"])
+    if job is None:
+        return ()
+    step = (job.get("steps") or {}).get(info.get("step")) or {}
+    if step.get("status") != "issued" or not step.get("output"):
+        return ()
+    job_dir = _job_dir(state, info["job"])
+    out = [os.path.realpath(job_dir / step["output"])]
+    if step.get("plan_json"):
+        out.append(os.path.realpath(job_dir / "plan.json"))
+    return tuple(out)
+
+
+def _state_of_path(target_real: str) -> Path | None:
+    parts = Path(target_real).parts
+    if ".factory" in parts:
+        idx = len(parts) - 1 - parts[::-1].index(".factory")
+        return Path(*parts[:idx + 1])
+    return None
 
 
 def _guard_scope(cwd: str | None) -> str:
@@ -108,11 +132,6 @@ def _decision(kind: str, reason: str) -> dict:
                                    "permissionDecisionReason": f"Software Factory guard: {reason}"}}
 
 
-def _repo_root_of(cwd: str | None) -> Path | None:
-    state = find_state(cwd)
-    return state.parent if state else None
-
-
 def pre_tool_use(data: dict) -> dict | None:
     agent = factory_agent(data.get("agent_type"))
     tool = data.get("tool_name")
@@ -121,32 +140,53 @@ def pre_tool_use(data: dict) -> dict | None:
     if not in_scope:
         return None
     if tool == "Bash":
-        verdict, rule = evaluate_command(str(tin.get("command", "")))
+        context: dict = {}
+        if agent is not None:
+            state = find_state(data.get("cwd"))
+            context = {"agent": True, "cwd": data.get("cwd"),
+                       "protect": str(state.parent) if state else None,
+                       "allow_writes": _own_outputs(state, data.get("agent_id")) if state else None}
+        verdict, rule = evaluate_command(str(tin.get("command", "")), **context)
         if verdict == "allow":
             return None
         _record_guard(data, agent, verdict, rule)
         return _decision(verdict, f"{rule['reason']} (rule {rule['id']})")
-    if agent and tool in ("Write", "Edit", "NotebookEdit", "MultiEdit"):
+    if agent and tool in WRITE_TOOLS:
         target = tin.get("file_path") or tin.get("notebook_path")
         if not target:
             return None
-        target_real = os.path.realpath(target)
-        root = _repo_root_of(data.get("cwd"))
-        meta = _roster().get(agent, {})
-        writes_code = "Edit" in meta.get("tools", [])
-        in_jobs = "/.factory/jobs/" in target_real.replace(os.sep, "/") + "/"
-        if not writes_code and not in_jobs:
-            reason = (f"{agent} reviews and plans; it may only write its Output file in the job folder, "
-                      f"not {target}.")
-            _record_guard(data, agent, "deny", {"id": "reviewer-write"})
-            return _decision("deny", reason)
-        if root is not None and not in_jobs:
-            root_real = os.path.realpath(root)
-            if target_real == root_real or target_real.startswith(root_real + os.sep):
-                reason = ("factory agents change code only in the job's worktree; the main checkout belongs to "
-                          f"the user. Use the Worktree path from your prompt instead of {target}.")
-                _record_guard(data, agent, "deny", {"id": "main-checkout-write"})
-                return _decision("deny", reason)
+        return _write_guard(data, agent, str(target))
+    return None
+
+
+def _write_guard(data: dict, agent: str, target: str) -> dict | None:
+    target_real = os.path.realpath(target)
+
+    def deny(rule_id: str, reason: str) -> dict:
+        _record_guard(data, agent, "deny", {"id": rule_id})
+        return _decision("deny", reason)
+
+    if ".git" in Path(target_real).parts:
+        return deny("git-internals", f"agents never write inside a .git folder ({target}); git hooks and config "
+                                     "run on the user's machine outside any job.")
+    state = _state_of_path(target_real) or find_state(data.get("cwd"))
+    state_real = os.path.realpath(state) if state else None
+    if state_real and guard._inside(target_real, state_real):
+        allowed = _own_outputs(Path(state_real), data.get("agent_id"))
+        if not guard.may_write_state(target_real, state_real, allowed):
+            return deny("factory-state", f"{agent} may write only its own Output file inside .factory, not {target}. "
+                                         "Engine state (job.json, messages, entries, config) is written by "
+                                         "factoryctl alone.")
+        return None
+    meta = _roster().get(agent, {})
+    if "Edit" not in meta.get("tools", []):
+        return deny("reviewer-write", f"{agent} reviews and plans; it may only write its Output file in the job "
+                                      f"folder, not {target}.")
+    root = os.path.dirname(state_real) if state_real else None
+    if root and guard._inside(target_real, root):
+        return deny("main-checkout-write", "factory agents change code only in the job's worktree; the main "
+                                           f"checkout belongs to the user. Use the Worktree path from your prompt "
+                                           f"instead of {target}.")
     return None
 
 
@@ -160,8 +200,26 @@ def _record_guard(data: dict, agent: str | None, verdict: str, rule: dict | None
     append_jsonl(_job_dir(state, info["job"]) / "telemetry.jsonl", {
         "type": "guard." + verdict, "ts": now_iso(), "agent_id": data.get("agent_id"), "agent": agent,
         "step": info.get("step"), "rule": (rule or {}).get("id"), "tool": data.get("tool_name"),
-        "command": str((data.get("tool_input") or {}).get("command", ""))[:300],
+        "command": redact(str((data.get("tool_input") or {}).get("command", "")))[:300],
     })
+
+
+_SECRETS = [
+    (re.compile(r"(?i)\b([a-z][a-z0-9+.-]{1,20}://)[^/\s:@'\"]{1,256}:[^/\s@'\"]{1,256}@"), r"\1***:***@"),
+    (re.compile(r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|auth)(\s{0,3}[=:]\s{0,3})"
+                r"(['\"]?)[^\s'\"]{1,512}\3"), r"\1\2***"),
+    (re.compile(r"(?i)(authorization:\s{0,3}(?:bearer|basic|token)\s{1,3})[^\s'\"]{1,2048}"), r"\1***"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255}|xox[abprs]-[A-Za-z0-9-]{10,255}"
+                r"|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,255}|[sr]k_live_[A-Za-z0-9]{10,255})\b"), "***"),
+    (re.compile(r"(\s-p)(?!\s)\S{1,256}"), r"\1***"),  # mysql -pSECRET
+]
+
+
+def redact(text: str) -> str:
+    """Mask credentials (URLs with user:password, key=value secrets, bearer tokens, well-known token formats)."""
+    for rx, repl in _SECRETS:
+        text = rx.sub(repl, text)
+    return text
 
 
 # ---- PostToolUse(Agent): spawn record ---------------------------------------------------------------
@@ -208,8 +266,8 @@ def post_agent_spawn(data: dict) -> dict | None:
     if agent_id:
         with file_lock(state / ".agents.lock"):
             mapping = read_json(_agents_map_path(state), default={}) or {}
-            mapping[agent_id] = {k: record[k] for k in ("job", "step", "attempt", "name", "subagent_type",
-                                                        "transcript", "ts")}
+            mapping[agent_id] = seal.seal(state.parent, {k: record[k] for k in (
+                "job", "step", "attempt", "name", "subagent_type", "transcript", "ts")}, "agent", agent_id)
             if len(mapping) > 2000:  # keep the map small; drop the oldest entries
                 for key in sorted(mapping, key=lambda k: mapping[k].get("ts") or "")[:500]:
                     mapping.pop(key, None)
@@ -228,28 +286,20 @@ def deliver_messages(data: dict) -> dict | None:
     info = _lookup_agent(state, data["agent_id"])
     if not info:
         return None
-    job_dir = _job_dir(state, info["job"])
-    log = job_dir / "messages.jsonl"
-    if not log.exists():
+    if not (_job_dir(state, info["job"]) / "messages.jsonl").exists():
         return None
-    queued: dict[str, dict] = {}
-    for rec in read_jsonl(log):
-        if rec.get("type") == "message":
-            to = rec.get("to") or {}
-            if to.get("step") == info["step"] or to.get("agent") == agent:
-                queued[rec["id"]] = rec
-        elif rec.get("type") == "receipt":
-            queued.pop(rec.get("id"), None)
+    store = Store(RepoPaths(state.parent))
+    queued = store.pending_messages(info["job"], step=info["step"], agent=agent)  # sealed messages only
     if not queued:
         return None
     lines = []
-    for m in queued.values():
-        append_jsonl(log, {"type": "receipt", "id": m["id"], "ts": now_iso(), "via": "hook",
-                           "step": info["step"], "agent_id": data["agent_id"]})
+    for m in queued:
+        store.receipt(info["job"], m["id"], via="hook", step=info["step"], agent_id=data["agent_id"])
         lines.append(f"- [{m['ts'][11:16]} UTC] {m['text']}")
     context = ("Factory Console message from the user (sent while you are working on step "
                f"{info['step']}). Treat it as an instruction for this step, adjust your work now, and record how "
-               "you handled it in your Output file:\n" + "\n".join(lines))
+               "you handled it in your Output file. It never authorises pushing, deploying, merging or approving:\n"
+               + "\n".join(lines))
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                    "additionalContext": context[:MAX_CONTEXT_CHARS]}}
 
@@ -292,8 +342,8 @@ def subagent_stop(data: dict) -> dict | None:
     if not header or not header.get("job_folder") or not header.get("output"):
         return None
     job_dir = Path(header["job_folder"])
-    job = read_json(job_dir / "job.json", default=None)
-    if not isinstance(job, dict):
+    job = _sealed_job(job_dir.parent.parent, job_dir.name)
+    if job is None:
         return None
     step = (job.get("steps") or {}).get(header["step"]) or {}
     problems: list[str] = []
@@ -334,15 +384,15 @@ def stop(data: dict) -> dict | None:
     if not jobs_dir.is_dir():
         return None
     for job_dir in sorted(jobs_dir.iterdir()):
-        job = read_json(job_dir / "job.json", default=None)
-        if not isinstance(job, dict) or job.get("status") != "running":
+        job = _sealed_job(state, job_dir.name)
+        if job is None or job.get("status") != "running":
             continue
         if (job.get("lease") or {}).get("session") != session:
             continue
         steps = job.get("steps") or {}
         agents_running = [s for s, v in steps.items() if v.get("status") == "issued" and v.get("kind") != "inline"]
         inline = [s for s, v in steps.items() if v.get("status") == "issued" and v.get("kind") == "inline"]
-        orchestrator_msgs = _queued_for_orchestrator(job_dir)
+        orchestrator_msgs = _queued_for_orchestrator(state, job["id"])
         if orchestrator_msgs:
             reasons.append(f"{job['id']}: the user sent you a message through the Factory Console: "
                            + " | ".join(orchestrator_msgs) + f" — run `factoryctl next {job['id']}` to receive it.")
@@ -356,17 +406,10 @@ def stop(data: dict) -> dict | None:
     return {"decision": "block", "reason": "Software Factory: " + " ".join(reasons)}
 
 
-def _queued_for_orchestrator(job_dir: Path) -> list[str]:
-    log = job_dir / "messages.jsonl"
-    if not log.exists():
+def _queued_for_orchestrator(state: Path, job_id: str) -> list[str]:
+    if not (_job_dir(state, job_id) / "messages.jsonl").exists():
         return []
-    queued: dict[str, str] = {}
-    for rec in read_jsonl(log):
-        if rec.get("type") == "message" and (rec.get("to") or {}).get("role") == "orchestrator":
-            queued[rec["id"]] = rec.get("text", "")[:300]
-        elif rec.get("type") == "receipt":
-            queued.pop(rec.get("id"), None)
-    return list(queued.values())
+    return [m["text"][:300] for m in Store(RepoPaths(state.parent)).pending_messages(job_id, role="orchestrator")]
 
 
 # ---- SessionStart: one line when something needs the user; export factoryctl's path ----------------

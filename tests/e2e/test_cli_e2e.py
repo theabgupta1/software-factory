@@ -107,7 +107,7 @@ class CliEndToEnd(RepoCase):
         self.addCleanup(httpd.shutdown)
         port = httpd.server_address[1]
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        conn.request("GET", f"/api/jobs/{job}", headers={"Host": f"127.0.0.1:{port}"})
+        conn.request("GET", f"/api/jobs/{job}", headers={"Host": f"127.0.0.1:{port}", "X-Factory-Token": _state.token})
         detail = json.loads(conn.getresponse().read())
         self.assertEqual(detail["job"]["status"], "merged")
         self.assertEqual([r["result"] for r in detail["quality"]["matrix"]], ["changes", "pass"])

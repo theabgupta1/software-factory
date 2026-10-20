@@ -28,6 +28,17 @@ test("markdown attribute breakout is impossible", () => {
   assert.ok(!/onmouseover="/.test(html));
 });
 
+test("markdown links cannot nest inside an href or go protocol-relative", () => {
+  const html = markdown("[a](http://x/(http://y/onmouseover=alert(1)//) and [b](//evil.example/x) and see https://ok.example/p");
+  assert.equal((html.match(/<a /g) || []).length, 2, html);
+  assert.ok(!/<a[^>]*\sonmouseover=/.test(html), html);
+  assert.ok(!html.includes('href="//'), html);
+  assert.ok(html.includes('href="https://ok.example/p"'), html);
+  const nested = markdown("[**bold** `code`](https://a.example/x_y_z) _em_");
+  assert.ok(nested.includes('href="https://a.example/x_y_z"'), nested);
+  assert.ok(nested.includes("<em>em</em>"), nested);
+});
+
 test("markdown structures: tables, task lists, fences, headers skipped", () => {
   const html = markdown("VERDICT: PASS\n\n## Findings\n- [x] done\n- [ ] todo\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```js\nx < 1\n```", { skipHeader: true });
   assert.ok(!html.includes("VERDICT"));

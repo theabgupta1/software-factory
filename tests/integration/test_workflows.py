@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from support import ROOT, Driver, FakeAgents, RepoCase, doc, sh  # noqa: E402
 
 from factory_core import registry  # noqa: E402
-from factory_core.engine import Engine  # noqa: E402
 from factory_core.paths import RepoPaths  # noqa: E402
 from factory_core.store import Store  # noqa: E402
 from factory_core.util import FactoryError, read_jsonl  # noqa: E402

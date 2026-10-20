@@ -1,14 +1,19 @@
 """The Factory Console: a local, dependency-free web server for the factory's UI.
 
-Security model: binds to loopback by default; rejects requests whose Host is not this server (DNS rebinding);
-the only writes (messages to agents, backlog items) need a per-run token embedded in the page plus a matching
-Origin; artifact reads are confined to the job folder; strict CSP; no third-party code is loaded.
+Security model: binds to loopback only (anything else needs --insecure-host) and answers only loopback clients;
+rejects requests whose Host is not this server (DNS rebinding); every API request, read or write, needs the per-run
+key that `factoryctl serve` prints once in the launch link (`/?token=…`; the page keeps it and drops it from the
+address bar; it is never embedded in a page); writes also need a same-origin Origin and a JSON body; artifact reads
+are confined to the job folder; strict CSP; no third-party code is loaded.
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
+import ipaddress
 import json
+import os
 import mimetypes
 import secrets
 import shutil
@@ -37,11 +42,29 @@ CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src '
 MAX_BODY = 64_000
 
 
+LOCKED = ("This page has no valid console key. Open the link that `factoryctl serve` printed (it ends in "
+          "?token=…); the key changes every time the console starts.")
+
+
+def loopback(address: str) -> bool:
+    """Is a client or bind address on this machine only (127.0.0.0/8, ::1, IPv4-mapped loopback, localhost)?"""
+    if address == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0].strip("[]"))
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return ip.is_loopback or bool(mapped and mapped.is_loopback)
+
+
 class ConsoleState:
-    def __init__(self, paths: RepoPaths | None, demo_root: Path | None = None):
+    def __init__(self, paths: RepoPaths | None, demo_root: Path | None = None, insecure: bool = False):
         self.default_paths = paths
         self.demo_root = demo_root
-        self.token = secrets.token_urlsafe(24)
+        fixed = os.environ.get("FACTORY_CONSOLE_TOKEN") or ""
+        self.token = fixed if len(fixed) >= 16 else secrets.token_urlsafe(24)
+        self.insecure = insecure
         self.allowed_hosts: set[str] = set()
         self.settings_cache: tuple[float, dict] | None = None
         self.lock = threading.Lock()
@@ -100,9 +123,13 @@ class Handler(BaseHTTPRequestHandler):
     def _host_ok(self) -> bool:
         return (self.headers.get("Host") or "").lower() in self.state.allowed_hosts
 
+    def _client_ok(self) -> bool:
+        return self.state.insecure or loopback(str(self.client_address[0]))
+
+    def _token_ok(self) -> bool:
+        return hmac.compare_digest((self.headers.get("X-Factory-Token") or "").encode(), self.state.token.encode())
+
     def _write_allowed(self) -> bool:
-        if self.headers.get("X-Factory-Token") != self.state.token:
-            return False
         origin = self.headers.get("Origin")
         if origin and origin.lower() not in {f"http://{h}" for h in self.state.allowed_hosts}:
             return False
@@ -110,6 +137,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- routing -----------------------------------------------------------------------------
     def do_GET(self):  # noqa: N802
+        if not self._client_ok():
+            return self._error(HTTPStatus.FORBIDDEN, "the console answers this machine only")
         if not self._host_ok():
             return self._error(HTTPStatus.MISDIRECTED_REQUEST, "unexpected Host header")
         url = urlparse(self.path)
@@ -122,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._static(parts[1:])
             if parts[0] != "api":
                 return self._index()  # client-side routes
+            if not self._token_ok():
+                return self._error(HTTPStatus.UNAUTHORIZED, LOCKED)
             project = (qs.get("project") or [None])[0]
             paths = None if parts[1:2] in (["catalog"],) else self.state.paths_for(project)
             route = parts[1:]
@@ -156,10 +187,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.BAD_REQUEST, "bad request")
 
     def do_POST(self):  # noqa: N802
+        if not self._client_ok():
+            return self._error(HTTPStatus.FORBIDDEN, "the console answers this machine only")
         if not self._host_ok():
             return self._error(HTTPStatus.MISDIRECTED_REQUEST, "unexpected Host header")
+        if not self._token_ok():
+            return self._error(HTTPStatus.UNAUTHORIZED, LOCKED)
         if not self._write_allowed():
-            return self._error(HTTPStatus.FORBIDDEN, "missing or invalid console token")
+            return self._error(HTTPStatus.FORBIDDEN, "writes need a same-origin request with a JSON body")
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0 or length > MAX_BODY:
             return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "body too large or empty")
@@ -203,7 +238,6 @@ class Handler(BaseHTTPRequestHandler):
     # ---- views --------------------------------------------------------------------------------
     def _index(self):
         html = (UI_ROOT / "index.html").read_text(encoding="utf-8")
-        html = html.replace("__FACTORY_TOKEN__", self.state.token)
         html = html.replace("__FACTORY_MODE__", "demo" if self.state.demo_root else "live")
         body = html.encode("utf-8")
         self._headers(HTTPStatus.OK, STATIC_TYPES[".html"], len(body), {"Cache-Control": "no-store"})
@@ -232,8 +266,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(paths: RepoPaths | None, host: str = "127.0.0.1", port: int = 0,
-                demo_root: Path | None = None) -> tuple[ThreadingHTTPServer, ConsoleState]:
-    state = ConsoleState(paths, demo_root)
+                demo_root: Path | None = None, insecure: bool = False) -> tuple[ThreadingHTTPServer, ConsoleState]:
+    if not loopback(host) and not insecure:
+        raise FactoryError(f"the console binds to this machine only; {host} would expose your jobs, diffs and agent "
+                           "transcripts to the network. Pass --insecure-host if you really mean it.")
+    state = ConsoleState(paths, demo_root, insecure=insecure)
     handler = type("BoundHandler", (Handler,), {"state": state})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
@@ -244,17 +281,20 @@ def make_server(paths: RepoPaths | None, host: str = "127.0.0.1", port: int = 0,
 
 
 def serve(paths: RepoPaths | None, host: str = "127.0.0.1", port: int = 0, open_browser: bool = False,
-          demo: bool = False) -> int:
+          demo: bool = False, insecure: bool = False) -> int:
+    if not loopback(host) and not insecure:
+        make_server(None, host, port)  # raises the explanation before any demo is built
     demo_root = None
     if demo:
         from . import demo as demo_mod
 
         demo_root = Path(tempfile.mkdtemp(prefix="factory-demo-"))
         paths = demo_mod.build(demo_root)
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        sys.stderr.write(f"warning: the console is binding to {host}; anyone who can reach it can read job state\n")
-    httpd, _state = make_server(paths, host, port, demo_root)
-    url = f"http://127.0.0.1:{httpd.server_address[1]}/"
+    if not loopback(host):
+        sys.stderr.write(f"warning: the console is binding to {host}; anyone who can reach it and has the link can "
+                         "read your jobs and message your agents\n")
+    httpd, state = make_server(paths, host, port, demo_root, insecure=insecure)
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/?token={state.token}"
     sys.stdout.write(json.dumps({"url": url, "repo": str(paths.root) if paths else None, "demo": demo}) + "\n")
     sys.stdout.flush()
     if open_browser:

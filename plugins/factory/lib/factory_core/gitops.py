@@ -12,6 +12,28 @@ from .util import FactoryError
 DIFF_FILE_LIMIT = 400
 
 
+def shared_fingerprint(repo: Path) -> str:
+    """Hash of the repository's shared git configuration and hooks. Agents must never change these: a planted hook
+    or alias runs on the user's machine long after the job, so the engine stops a job when they change."""
+    import hashlib
+
+    common = Path(repo) / ".git"
+    if not common.is_dir():
+        from .paths import git_common_dir
+
+        common = git_common_dir(Path(repo)) or common
+    h = hashlib.sha256()
+    for rel in ("config", "info/attributes"):
+        p = common / rel
+        h.update(rel.encode() + b"\0" + (p.read_bytes() if p.is_file() else b"-") + b"\0")
+    hooks = common / "hooks"
+    if hooks.is_dir():
+        for p in sorted(hooks.iterdir()):
+            if not p.name.endswith(".sample"):
+                h.update(b"hook:" + p.name.encode() + b"\0" + (p.read_bytes() if p.is_file() else b"dir") + b"\0")
+    return h.hexdigest()
+
+
 def branch_exists(repo: Path, branch: str) -> bool:
     return git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], repo, check=False).returncode == 0
 

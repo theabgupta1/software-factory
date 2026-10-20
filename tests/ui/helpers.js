@@ -47,9 +47,9 @@ export async function setTheme(page, theme) {
   await page.evaluate((t) => { try { localStorage.setItem("factory.theme", t); } catch { /* ignore */ } document.documentElement.dataset.theme = t; }, theme);
 }
 
-/** The console's per-run write token, as the page itself reads it. */
-export async function token(page) {
-  return page.locator('meta[name="factory-token"]').getAttribute("content");
+/** The console's per-run key (fixed for the test server by playwright.config.js). */
+export async function token() {
+  return process.env.FACTORY_CONSOLE_TOKEN;
 }
 
 export async function apiPost(page, path, body) {

@@ -202,13 +202,7 @@ function conversation(feed, messages, entry) {
   messages.forEach((m) => rows.push({ ts: m.ts, kind: "user-msg", m }));
   rows.sort((a, b) => (a.ts || "").localeCompare(b.ts || ""));
   return rows.map((r) => {
-    if (r.kind === "user-msg") {
-      const m = r.m;
-      const status = m.status === "delivered"
-        ? `Delivered ${m.delivered?.via === "hook" ? "mid-run" : m.delivered?.via === "prompt" ? "in its prompt" : `via ${m.delivered?.via}`} · ${clock(m.delivered?.ts)}`
-        : "Queued";
-      return h("div", { class: "bubble user" }, m.text, h("div", { class: "meta" }, `You · ${clock(m.ts)}`, " · ", status));
-    }
+    if (r.kind === "user-msg") return messageBubble(r.m, true);
     const it = r.it;
     if (it.kind === "text") return h("div", { class: "bubble agent" }, h("div", { class: "md" }, rawMd(it.text)), h("div", { class: "meta" }, clock(it.ts)));
     if (it.kind === "tool") return h("div", { class: "tool-line" }, h("span", { class: "tool-name" }, it.tool), h("code", { class: "truncate" }, it.summary));
@@ -216,6 +210,19 @@ function conversation(feed, messages, entry) {
     if (it.kind === "user") return h("div", { class: "bubble agent" }, h("div", { class: "xs faint" }, "Prompt / feedback"), h("div", { class: "small" }, it.text.slice(0, 600)));
     return null;
   });
+}
+
+// A message as the thread shows it. "unverified" lines were written into the job folder by something other than
+// the console or factoryctl (they fail the integrity check); the factory never delivers them.
+function messageBubble(m, detailed) {
+  if (m.status === "unverified") {
+    return h("div", { class: "bubble user unverified" }, m.text,
+      h("div", { class: "meta" }, `Not sent by you · ${clock(m.ts)} · ignored: it failed the factory's integrity check`));
+  }
+  const status = m.status !== "delivered" ? "Queued"
+    : !detailed ? `Delivered ${clock(m.delivered?.ts)}`
+      : `Delivered ${m.delivered?.via === "hook" ? "mid-run" : m.delivered?.via === "prompt" ? "in its prompt" : `via ${m.delivered?.via}`} · ${clock(m.delivered?.ts)}`;
+  return h("div", { class: "bubble user" }, m.text, h("div", { class: "meta" }, `You · ${clock(m.ts)}`, " · ", status));
 }
 
 function rawMd(text) {
@@ -241,9 +248,7 @@ function openOrchestrator(ctx, detail) {
   const body = h("div", { class: "drawer-body", tabindex: "0", "aria-label": "Messages to the orchestrator" });
   const renderBody = (d) => {
     const msgs = (d.messages || []).filter((m) => m.to.role === "orchestrator");
-    patch(body, JSON.stringify(msgs.map((m) => [m.id, m.status])), () => msgs.length ? h("div", { class: "convo" }, msgs.map((m) =>
-      h("div", { class: "bubble user" }, m.text, h("div", { class: "meta" }, `You · ${clock(m.ts)}`, " · ",
-        m.status === "delivered" ? `Delivered ${clock(m.delivered?.ts)}` : "Queued"))))
+    patch(body, JSON.stringify(msgs.map((m) => [m.id, m.status])), () => msgs.length ? h("div", { class: "convo" }, msgs.map((m) => messageBubble(m, false)))
       : empty("message", "No messages yet", "Steer the whole job: pause, skip, change priorities."));
   };
   const textarea = h("textarea", { class: "textarea", rows: 3, id: "orchestrator-msg", "data-autofocus": true,

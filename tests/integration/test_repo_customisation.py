@@ -18,7 +18,6 @@ from support import FACTORYCTL, Driver, RepoCase, sh  # noqa: E402
 
 from factory_core import config, console  # noqa: E402
 from factory_core.store import Store  # noqa: E402
-from factory_core.util import FactoryError  # noqa: E402
 
 
 class WorktreePreparation(RepoCase):

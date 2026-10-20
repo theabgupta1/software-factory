@@ -307,6 +307,8 @@ h1, h2, h3, h4 { margin: 0; letter-spacing: var(--tracking-tight); line-height: 
 .bubble.agent { background: var(--surface-2); border: 1px solid var(--border); border-top-left-radius: var(--r-xs); }
 .bubble.user { justify-self: end; background: var(--accent); color: var(--accent-ink); border-top-right-radius: var(--r-xs); }
 .bubble.user .meta { color: color-mix(in srgb, var(--accent-ink) 82%, transparent); }
+.bubble.user.unverified { background: var(--surface-2); color: var(--text-2); border: 1px dashed var(--st-blocked); }
+.bubble.user.unverified .meta { color: var(--text-2); }
 .bubble .meta { display: flex; gap: var(--s-2); align-items: center; font-size: 10.5px; color: var(--text-3); margin-top: 6px; }
 .tool-line { display: flex; gap: var(--s-2); align-items: baseline; font-size: var(--text-xs); color: var(--text-2); padding: 3px var(--s-2); border-left: 2px solid var(--border-strong); margin-left: var(--s-2); }
 .tool-line code { color: var(--text); background: none; padding: 0; }

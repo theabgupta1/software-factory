@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import os
 import sys
 import threading
 import unittest
@@ -35,9 +34,11 @@ class ConsoleServer(RepoCase):
         self.httpd.server_close()
         super().tearDown()
 
-    def req(self, method, path, body=None, headers=None, host=None):
+    def req(self, method, path, body=None, headers=None, host=None, key=True):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         hdrs = {"Host": host or f"127.0.0.1:{self.port}"}
+        if key:
+            hdrs["X-Factory-Token"] = self.state.token
         hdrs.update(headers or {})
         data = json.dumps(body).encode() if isinstance(body, (dict, list)) else body
         conn.request(method, path, body=data, headers=hdrs)
@@ -91,11 +92,11 @@ class ConsoleServer(RepoCase):
         self.assertIn("doctor", settings)
         self.assertTrue(any(r["id"] == "no-push" for r in settings["guard"]))
 
-    def test_index_injects_token_and_sets_security_headers(self):
-        status, headers, body = self.req("GET", "/")
+    def test_index_never_carries_the_key_and_sets_security_headers(self):
+        status, headers, body = self.req("GET", "/", key=False)
         self.assertEqual(status, 200)
-        self.assertIn(self.state.token, body)
-        self.assertNotIn("__FACTORY_TOKEN__", body)
+        self.assertNotIn(self.state.token, body)
+        self.assertNotIn("factory-token", body)
         self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(headers["X-Frame-Options"], "DENY")
@@ -130,12 +131,34 @@ class ConsoleServer(RepoCase):
         self.assertEqual(self.req("GET", "/api/jobs/..%2f..%2fetc")[0], 400)
         self.assertEqual(self.req("GET", "/api/jobs/999-nope")[0], 404)
 
+    def test_every_api_read_needs_the_key(self):
+        for path in ("/api/state", f"/api/jobs/{self.job['id']}", f"/api/jobs/{self.job['id']}/diff",
+                     f"/api/jobs/{self.job['id']}/artifact?path=spec.md", "/api/catalog", "/api/settings"):
+            with self.subTest(path=path):
+                status, _, data = self.req("GET", path, key=False)
+                self.assertEqual(status, 401)
+                self.assertIn("?token=", data["error"])
+                self.assertEqual(self.req("GET", path, key=False, headers={"X-Factory-Token": "x" * 32})[0], 401)
+        self.assertEqual(self.req("GET", "/assets/js/app.js", key=False)[0], 200, "static files carry no data")
+
+    def test_only_loopback_binds_and_clients(self):
+        from factory_core import server
+        from factory_core.util import FactoryError
+
+        for addr in ("127.0.0.1", "127.8.9.1", "::1", "::ffff:127.0.0.1", "localhost"):
+            self.assertTrue(server.loopback(addr), addr)
+        for addr in ("0.0.0.0", "192.168.1.5", "::", "10.0.0.1", "evil.example", ""):
+            self.assertFalse(server.loopback(addr), addr)
+        with self.assertRaises(FactoryError) as err:
+            make_server(self.paths, host="0.0.0.0", port=0)
+        self.assertIn("--insecure-host", str(err.exception))
+
     def test_writes_need_token_origin_and_json(self):
         path = f"/api/jobs/{self.job['id']}/messages"
         body = {"to": {"agent": "builder"}, "text": "hello"}
         no_token = {k: v for k, v in self.write_headers().items() if k != "X-Factory-Token"}
-        self.assertEqual(self.req("POST", path, body, no_token)[0], 403)
-        self.assertEqual(self.req("POST", path, body, self.write_headers(**{"X-Factory-Token": "nope"}))[0], 403)
+        self.assertEqual(self.req("POST", path, body, no_token, key=False)[0], 401)
+        self.assertEqual(self.req("POST", path, body, self.write_headers(**{"X-Factory-Token": "nope"}))[0], 401)
         self.assertEqual(self.req("POST", path, body, self.write_headers(Origin="http://evil.example"))[0], 403)
         self.assertEqual(self.req("POST", path, body, self.write_headers(**{"Content-Type": "text/plain"}))[0], 403)
         self.assertEqual(self.req("POST", path, b"x" * 70000, self.write_headers())[0], 413)

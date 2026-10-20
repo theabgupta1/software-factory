@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -151,15 +152,18 @@ class CliCommands(RepoCase):
         self.ctl("init")
         proc = subprocess.Popen([sys.executable, str(FACTORYCTL), "serve", "--port", "0"], cwd=self.repo,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(proc.stderr.close)
+        self.addCleanup(proc.stdout.close)
         self.addCleanup(proc.wait, 10)
         self.addCleanup(proc.terminate)
         line = proc.stdout.readline()
-        url = json.loads(line)["url"]
-        port = int(url.rsplit(":", 1)[1].strip("/"))
+        url = urllib.parse.urlparse(json.loads(line)["url"])
+        port, key = url.port, urllib.parse.parse_qs(url.query)["token"][0]
+        self.assertGreaterEqual(len(key), 24, "the launch link carries the console key")
         for _ in range(50):
             try:
                 conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-                conn.request("GET", "/api/state", headers={"Host": f"127.0.0.1:{port}"})
+                conn.request("GET", "/api/state", headers={"Host": f"127.0.0.1:{port}", "X-Factory-Token": key})
                 data = json.loads(conn.getresponse().read())
                 break
             except OSError:
@@ -180,3 +184,28 @@ class CliCommands(RepoCase):
         self.assertEqual([i["text"] for i in items], ["Dark mode", "CSV export"])
         nxt = self.ctl("backlog", "next", "--json")
         self.assertIn("Dark mode", json.dumps(nxt))
+
+    def test_cmd_trust(self):
+        self.write_config({"worktree": {"setup": ["make deps"]}})
+        self.git("add", "-f", ".factory/config.json")
+        self.git("commit", "-qm", "ship config")
+        job = self.ctl("new", "--size", "S", "Add a footer")["job"]
+        warned = self.ctl("next", job)
+        self.assertEqual((warned["commands"], "factoryctl trust" in warned["config_warning"]), ([], True))
+        out = self.ctl("trust")
+        self.assertTrue(out["tracked"])
+        self.assertEqual(out["config"]["worktree"]["setup"], ["make deps"], "it shows what you are trusting")
+        job2 = self.ctl("new", "--size", "S", "Add a header")["job"]
+        self.assertEqual(self.ctl("next", job2)["commands"], ["make deps"])
+
+    def test_cmd_reseal(self):
+        job = self.ctl("new", "--size", "S", "Add a footer")["job"]
+        path = self.repo / ".factory" / "jobs" / job / "job.json"
+        data = json.loads(path.read_text())
+        data["title"] = "Edited by hand"
+        path.write_text(json.dumps(data))
+        err = self.ctl("next", job, expect=4, json_out=False)
+        self.assertEqual(err, "")
+        out = self.ctl("reseal", job)
+        self.assertEqual(out["result"], "resealed")
+        self.assertIn(self.ctl("next", job)["kind"], ("inline", "spawn"))

@@ -47,8 +47,8 @@ def _request(args) -> str:
     if args.request == ["-"]:
         return sys.stdin.read()
     text = " ".join(args.request or [])
-    if not text.strip() and not getattr(args, "from_issue", None):
-        raise FactoryError("give a request (or --from-issue N)")
+    if not text.strip() and not getattr(args, "from_issue", None) and not getattr(args, "from_backlog", False):
+        raise FactoryError("give a request (or - to read it from stdin, --from-issue N or --from-backlog)")
     return text
 
 
@@ -85,6 +85,14 @@ def issue_request(number: int, cwd: Path) -> tuple[str, str, dict]:
 def cmd_new(args) -> int:
     eng = _engine(args)
     request, title, params = _request(args), args.title, _params(args.param)
+    if args.from_backlog:
+        if args.from_issue or request.strip():
+            raise FactoryError("--from-backlog takes the request from the backlog; give nothing else")
+        ensure_state_dir(eng.paths)
+        request = _claim_backlog(eng.paths)
+        if request is None:
+            raise FactoryError("the backlog has no open items")
+        args.backlog_item = request
     if args.from_issue:
         issue_text, issue_title, issue_params = issue_request(args.from_issue, eng.paths.root)
         extra = request.strip()
@@ -278,7 +286,7 @@ def cmd_serve(args) -> int:
     from . import server
 
     return server.serve(_paths(args) if not args.demo else None, host=args.host, port=args.port,
-                        open_browser=args.open, demo=args.demo)
+                        open_browser=args.open, demo=args.demo, insecure=args.insecure_host)
 
 
 def cmd_index(args) -> int:
@@ -314,6 +322,22 @@ def _backlog_items(text: str) -> list[dict]:
     return items
 
 
+def _claim_backlog(paths: RepoPaths) -> str | None:
+    """Mark the first open backlog item claimed and return its text (None when there is none)."""
+    path = _backlog_path(paths)
+    with file_lock(paths.state / ".backlog.lock"):
+        if not path.exists():
+            return None
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("- [ ] "):
+                item = line[6:].strip()
+                lines[i] = f"- [x] {item} → claimed"
+                write_text_atomic(path, "\n".join(lines) + "\n")
+                return item
+    return None
+
+
 def _backlog_link(paths: RepoPaths, item: str, job_id: str) -> None:
     path = _backlog_path(paths)
     with file_lock(paths.state / ".backlog.lock"):
@@ -342,7 +366,7 @@ def cmd_backlog(args) -> int:
                     sys.stdout.write(f"{'[x]' if it['done'] else '[ ]'} {it['text']}{' → ' + it['job'] if it['job'] else ''}\n")
             return 0
         if args.action == "add":
-            item = " ".join(args.text).strip()
+            item = (sys.stdin.read() if args.text == ["-"] else " ".join(args.text)).strip()
             if not item or "\n" in item or len(item) > 500:
                 raise FactoryError("a backlog item is one line of up to 500 characters")
             if not text.endswith("\n"):
@@ -350,18 +374,26 @@ def cmd_backlog(args) -> int:
             write_text_atomic(path, text + f"- [ ] {item}\n")
             _print({"added": item, "path": str(path)})
             return 0
-        if args.action == "next":
-            lines = text.splitlines()
-            for i, line in enumerate(lines):
-                if line.startswith("- [ ] "):
-                    item = line[6:].strip()
-                    lines[i] = f"- [x] {item} → claimed"
-                    write_text_atomic(path, "\n".join(lines) + "\n")
-                    _print({"item": item, "claimed_at": now_iso()})
-                    return 0
-            _print({"item": None})
-            return 0
+    if args.action == "next":
+        item = _claim_backlog(paths)
+        _print({"item": item, "claimed_at": now_iso()} if item else {"item": None})
+        return 0
     raise FactoryError(f"unknown backlog action {args.action}")
+
+
+def cmd_trust(args) -> int:
+    from . import config
+
+    paths = _paths(args)
+    out = config.trust(paths)
+    out["tracked"] = config.is_tracked(paths)
+    _print(out)
+    return 0
+
+
+def cmd_reseal(args) -> int:
+    _print(_engine(args).reseal(args.job))
+    return 0
 
 
 # ---- parser ------------------------------------------------------------------------------------
@@ -383,6 +415,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--param", action="append", help="key=value (e.g. agent=sql-engineer, repo=true)")
     s.add_argument("--backlog-item", help="link the claimed backlog line to the new job")
     s.add_argument("--from-issue", type=int, help="use GitHub issue N (via gh) as the request")
+    s.add_argument("--from-backlog", action="store_true", help="claim the next backlog item as the request")
     s.set_defaults(fn=cmd_new)
 
     s = sub.add_parser("next", help="the next action for a job")
@@ -427,8 +460,15 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--step")
     g.add_argument("--agent")
     g.add_argument("--orchestrator", action="store_true")
-    s.add_argument("text", nargs="+")
+    s.add_argument("text", nargs="+", help="the message, or - to read it from stdin")
     s.set_defaults(fn=cmd_tell)
+
+    sub.add_parser("trust", help="use the repository's tracked .factory/config.json as it is now (read it first)") \
+        .set_defaults(fn=cmd_trust)
+
+    s = sub.add_parser("reseal", help="accept a job.json you edited by hand (it fails its integrity check)")
+    s.add_argument("job")
+    s.set_defaults(fn=cmd_reseal)
 
     s = sub.add_parser("messages", help="list a job's messages and receipts")
     s.add_argument("job")
@@ -456,13 +496,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=0, help="0 picks a free port")
     s.add_argument("--open", action="store_true", help="open the browser")
     s.add_argument("--demo", action="store_true", help="serve labelled demo data instead of a repo")
+    s.add_argument("--insecure-host", action="store_true",
+                   help="allow a non-loopback --host (anyone with network access and the link can use the console)")
     s.set_defaults(fn=cmd_serve)
 
     sub.add_parser("index", help="rebuild .factory/index.json").set_defaults(fn=cmd_index)
 
     s = sub.add_parser("backlog", help="list, add or claim backlog items")
     s.add_argument("action", choices=["list", "add", "next"])
-    s.add_argument("text", nargs="*")
+    s.add_argument("text", nargs="*", help="for add: the item, or - to read it from stdin")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_backlog)
     return p

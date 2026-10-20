@@ -37,9 +37,16 @@ def _has_state(cwd):
     return False
 
 
+def _maybe_factory_agent(data):
+    """`factory:<name>`, or a bare agent name in a repo that uses the factory (copied installs set agent_prefix "").
+    hooks.factory_agent makes the exact call against the roster."""
+    agent_type = str(data.get("agent_type") or "")
+    return agent_type.startswith("factory:") or (bool(agent_type) and _has_state(data.get("cwd")))
+
+
 def _irrelevant(event, data):
     """Cheap checks so non-factory sessions never import the engine."""
-    factory_agent = str(data.get("agent_type") or "").startswith("factory:")
+    factory_agent = _maybe_factory_agent(data)
     if event == "post-tool-use":
         spawning = data.get("tool_name") in ("Agent", "Task") and not data.get("agent_id")
         if spawning:
@@ -73,7 +80,7 @@ def main():
         result = handler(data) if handler else None
     except Exception:  # noqa: BLE001 - hooks must never break a session
         _log(event, traceback.format_exc(limit=3).replace("\n", " | "))
-        if event == "pre-tool-use" and (data.get("agent_type") or "").startswith("factory:"):
+        if event == "pre-tool-use" and _maybe_factory_agent(data):
             result = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
                                              "permissionDecisionReason": "Software Factory guard errored; "
                                                                          "please confirm this action."}}

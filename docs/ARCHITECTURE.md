@@ -93,13 +93,18 @@ factory (`factory/jobs/`) are listed read-only.
   performance for perf/data work. Membership only grows; every seat records why. A round waits for all reviewers;
   any `VERDICT: CHANGES` sends the job back to the builder (resumed by message, or re-spawned with a continuation
   brief if its session is gone); after the last allowed round the job escalates. The engine checks that the branch
-  head did not move during a review round (reviewers may not edit code).
+  head did not move and the worktree stayed clean during a review round (reviewers must not edit code).
 - **Approval and delivery.** The approver escalates money, access, deploy/CI, migrations, production data, new
   dependencies and product decisions; `always_escalate` globs and workflow policy (infra) force escalation. Approved
   work merges locally into the base branch if the main checkout is clean and `git merge-tree` predicts no conflict —
   or, with `deliver: branch`, stops with the branch ready and the push/PR commands for you.
 - **Limits.** `max_agent_runs`, `max_review_rounds`, `max_attempts`, `max_parallel`. A limit stops the job for a
   human; nothing continues silently.
+- **Integrity.** `job.json`, messages, receipts and the subagent map are sealed with a per-repository key in
+  `.git/factory/state.key`; the engine refuses a job whose seal does not match and never delivers an unsealed
+  message. The shared `.git/config` and hooks are fingerprinted at job start; a change stops the job
+  (`git-changed`). A `.factory/config.json` tracked by git applies only its harmless keys until `factoryctl trust`.
+  Details: [SECURITY.md](SECURITY.md).
 
 ## Sessions, leases, resume
 
@@ -139,7 +144,7 @@ importing the engine). Errors are logged to `~/.claude/factory-hooks.log`; the g
 
 | Event | What it does |
 |---|---|
-| PreToolUse (Bash, Write, Edit, …) | For factory agents: deny catastrophic commands (push, `rm -rf /`, IaC apply/destroy, publish…), ask for risky ones (kubectl/helm/cloud mutations, destructive SQL, `sudo`, pipe-to-shell…); reviewers may write only under `.factory/jobs/`; implementers may not write in the main checkout |
+| PreToolUse (Bash, Write, Edit, …) | For factory agents: the command guard (`guard.py`) reads the command like a shell (compound commands, substitutions, `bash -c`, wrappers, global options) and denies push, deploy, publish, apply and destructive commands, changes to your checkout and to the factory's state; asks for risky ones (kubectl/helm/cloud mutations, destructive SQL, `sudo`, pipe-to-shell…). Write/Edit: inside `.factory/` only the agent's own Output; never `.git/`; implementers not in your checkout |
 | PostToolUse (Agent) | Records the spawned agent (id, step, transcript path) |
 | PostToolUse (other) | Delivers queued messages to the running agent |
 | SubagentStop | Contract check on the agent's output (blocks once), usage telemetry deduplicated by message id |
@@ -148,7 +153,8 @@ importing the engine). Errors are logged to `~/.claude/factory-hooks.log`; the g
 
 ## Console
 
-`factoryctl serve` starts a `ThreadingHTTPServer` on 127.0.0.1 (random port unless `--port`). The page is vanilla ES
+`factoryctl serve` starts a `ThreadingHTTPServer` on 127.0.0.1 (random port unless `--port`; other hosts need
+`--insecure-host`) and prints a launch link carrying a per-run key, which every API request needs. The page is vanilla ES
 modules and CSS tokens — no framework, no build step, no CDN. It polls `/api/state` and the open job with ETags.
 Reads: state, job detail, diff (`git diff base...branch`, capped), artifacts (confined to the job folder), agent
 activity (from transcripts under the Claude projects folder only), catalog, settings. Writes: messages and backlog

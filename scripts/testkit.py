@@ -402,8 +402,15 @@ def components() -> list[tuple[str, str, str, list[tuple[str, str]]]]:
             rules.append(("e2e", r"through_the_cli"))
         rows.append(("factoryctl", f"`{cmd}`", help_text, rules))
     hooks = [
-        ("PreToolUse guard", "Denies catastrophic and asks on risky commands for factory agents; reviewers write only "
-                             "under .factory/jobs", [("unit", r"Guard|WriteGuard"), ("e2e", r"through_the_cli")]),
+        ("PreToolUse command guard", "Reads commands like a shell (compound, substitutions, bash -c, wrappers, global "
+                                     "options); denies push/deploy/publish/apply/destroy; asks on risky ones",
+         [("unit", r"Guard\.test_guard_table|RunScript\.test_(guard|bare)"), ("e2e", r"through_the_cli")]),
+        ("Guard limits", "Padded, nested or unbalanced commands are answered in < 1 s; patterns bounded; credentials "
+                         "masked in telemetry", [("unit", r"GuardLimits")]),
+        ("Agent-only rules", "No changes to your checkout or the factory's state; no factoryctl; no git hooks",
+         [("unit", r"AgentGuard")]),
+        ("Write guard", "Inside .factory only the agent's own Output; never .git; implementers not in your checkout",
+         [("unit", r"WriteGuard")]),
         ("PostToolUse spawn record + message delivery", "Maps agent ids to steps; hands queued user messages to the "
                                                         "running agent", [("unit", r"SpawnAndMessages")]),
         ("SubagentStop contract check", "Blocks once with the problems when an output breaks its contract; records "
@@ -415,6 +422,20 @@ def components() -> list[tuple[str, str, str, list[tuple[str, str]]]]:
         ("Hook performance", "Every hook exits in < 250 ms p95 outside factory context", [("unit", r"RunScript")]),
     ]
     rows += [("Hooks", f"{n}", e, r) for n, e, r in hooks]
+    integrity = [
+        ("Sealed job state", "An edited job.json stops the engine until `reseal`; the key lives in .git/factory",
+         [("integration", r"TamperedState"), ("e2e", r"test_cmd_reseal")]),
+        ("Sealed messages", "Messages and receipts written outside the console/factoryctl are never delivered",
+         [("unit", r"forged"), ("integration", r"forged_orchestrator_note")]),
+        ("Git config and hooks", "A planted hook or alias stops the job (git-changed) until the user resumes",
+         [("integration", r"GitIntegrity")]),
+        ("Tracked config trust", "A config that came with the repo runs nothing until `factoryctl trust`; setup "
+                                 "commands go through the guard; repo notes fenced",
+         [("integration", r"TrackedConfig"), ("e2e", r"test_cmd_trust")]),
+        ("Free text on stdin", "Requests, notes, messages and backlog items reach factoryctl verbatim via stdin",
+         [("integration", r"FreeTextThroughStdin")]),
+    ]
+    rows += [("Integrity", n, e, r) for n, e, r in integrity]
     sys.path.insert(0, str(ROOT / "tests"))
     views = [("Command Center", r"home|needs-you|composer|live updates"), ("Job · Overview", r"job-overview|escalated|legacy"),
              ("Job · Crew + agent chat", r"crew|orchestrator"), ("Job · Flow (DAG)", r"flow"),
@@ -426,8 +447,9 @@ def components() -> list[tuple[str, str, str, list[tuple[str, str]]]]:
                      [("ui", pattern)]))
     rows.append(("Console", "Console logic", "Escaped markdown and safe links, formatting, diff parsing, routes, commands",
                  [("js", r".")]))
-    rows.append(("Console", "HTTP API + security", "Host/Origin/token checks, CSP, confined paths, ETag, size limits",
-                 [("unit", r"ConsoleServer"), ("e2e", r"through_the_cli")]))
+    rows.append(("Console", "HTTP API + security", "Loopback only; per-run key on every API call (never in the page); "
+                 "Host/Origin checks, CSP, confined paths, ETag, size limits",
+                 [("unit", r"ConsoleServer"), ("e2e", r"through_the_cli|test_cmd_serve"), ("ui", r"console key")]))
     for feature, pattern in [("Status line + notifications", r"session >"), ("Band above the prompt", r"band"),
                              ("/factory-board pane, Watch, Message", r"board >"), ("Pure rules (model.ts)", r"model >"),
                              ("Type check", r"type-check")]:

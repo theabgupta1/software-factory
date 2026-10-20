@@ -90,14 +90,20 @@ class Manifests(unittest.TestCase):
     def test_guard_policy_compiles_and_is_complete(self):
         policy = json.loads((PLUGIN / "guard-policy.json").read_text())
         ids = set()
+        source = (PLUGIN / "lib" / "factory_core" / "guard.py").read_text()
         for rule in policy["rules"]:
-            re.compile(rule["pattern"])
+            if rule.get("check") == "builtin":
+                self.assertIn(f'"{rule["id"]}"', source, f"{rule['id']} is not produced by guard.py")
+            else:
+                re.compile(rule["pattern"])
             self.assertIn(rule["decision"], ("deny", "ask"))
             self.assertTrue(rule["reason"])
             self.assertNotIn(rule["id"], ids)
             ids.add(rule["id"])
-        for must in ("no-push", "iac-apply", "rm-root", "publish"):
+        for must in ("no-push", "iac-apply", "rm-root", "publish", "deploy", "main-checkout", "factory-state"):
             self.assertIn(must, ids)
+        emitted = set(re.findall(r'ctx\.hit\("([a-z-]+)"', source)) - {"sql-client"}
+        self.assertEqual(emitted - ids, set(), "every rule the guard can emit has a decision and reason here")
 
     def test_ui_assets_referenced_exist(self):
         html = (PLUGIN / "ui" / "index.html").read_text()

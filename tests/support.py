@@ -128,7 +128,7 @@ class FakeAgents:
             self._commit(wt, "test_characterize.py", "def test_x():\n    assert True\n", "Pin behaviour")
             out.write_text(doc(forced or "VERDICT: PASS", "Results"))
         else:
-            from factory_core import contracts, registry
+            from factory_core import registry
 
             artifact = next(a for a, spec in registry.contracts()["artifacts"].items() if a == _artifact_for(out.name))
             spec = registry.contracts()["artifacts"][artifact]

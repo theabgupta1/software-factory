@@ -35,9 +35,12 @@ built on Claude Code's mod API.
   (axe-tested), responsive down to phones. No build step, no CDN, nothing leaves your machine.
 - **factory-live** (optional) — the factory inside Claude Code: a status line, a band when a job needs you, a
   `/factory-board` pane with every agent at work, Watch (open its transcript) and Message.
-- **Safety by construction** — the factory never pushes, deploys, publishes or applies infrastructure. A guard hook
-  denies catastrophic commands and asks before risky ones; reviewers cannot edit code; approved jobs merge locally;
-  money, access, deploy/CI, migrations, production data, new dependencies and product decisions always go to you.
+- **Safety by design, in layers** — the engine has no code path that pushes, deploys, publishes or applies
+  infrastructure; a guard hook that reads commands like a shell stops agents' direct attempts and asks before risky
+  ones, and keeps them out of your checkout and the factory's state; job state and your messages are sealed, so
+  forgeries are caught; a review round that moves the branch stops the job; approved jobs merge locally; money,
+  access, deploy/CI, migrations, production data, new dependencies and product decisions always go to you. It is
+  defence in depth inside your session, not a sandbox ([SECURITY.md](docs/SECURITY.md)).
 
 | Talk to an agent mid-run | The job as a graph | On a phone |
 |---|---|---|

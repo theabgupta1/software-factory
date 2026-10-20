@@ -9,6 +9,14 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PORT = Number(process.env.FACTORY_UI_PORT || 8790);
 const claudeHome = mkdtempSync(join(tmpdir(), "factory-ui-claude-home-"));
+// A fixed console key for the test server (workers inherit it); every page starts with it, as if opened from the
+// link `factoryctl serve` prints. Specs that test the locked state open a context without it.
+process.env.FACTORY_CONSOLE_TOKEN ||= "ui-tests-console-key-0123456789";
+export const STORAGE = {
+  cookies: [],
+  origins: [{ origin: `http://127.0.0.1:${PORT}`,
+    localStorage: [{ name: `factory.token:${PORT}`, value: process.env.FACTORY_CONSOLE_TOKEN }] }],
+};
 
 export default defineConfig({
   testDir: ".",
@@ -22,6 +30,7 @@ export default defineConfig({
   reporter: [["list"], ["json", { outputFile: join(ROOT, "test-results", "ui.json") }]],
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
+    storageState: STORAGE,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -37,6 +46,6 @@ export default defineConfig({
     url: `http://127.0.0.1:${PORT}/`,
     reuseExistingServer: false,
     timeout: 60_000,
-    env: { CLAUDE_CONFIG_DIR: claudeHome },
+    env: { CLAUDE_CONFIG_DIR: claudeHome, FACTORY_CONSOLE_TOKEN: process.env.FACTORY_CONSOLE_TOKEN },
   },
 });

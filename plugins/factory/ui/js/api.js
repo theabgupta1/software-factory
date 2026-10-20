@@ -1,8 +1,26 @@
-// Console API client: ETag-aware polling, a per-run write token, and project selection.
+// Console API client: ETag-aware polling, the per-run console key, and project selection.
 
 const DOC = typeof document === "undefined" ? null : document;  // null when imported by Node unit tests
-const TOKEN = DOC?.querySelector('meta[name="factory-token"]')?.content || "";
 export const MODE = DOC?.querySelector('meta[name="factory-mode"]')?.content || "live";
+
+// `factoryctl serve` prints a link ending in ?token=…: keep the key for this console (port) and drop it from the
+// address bar so it is not bookmarked, shared or shown. The server never embeds it in a page.
+const TOKEN_KEY = "factory.token:" + (globalThis.location?.port || "");
+function takeToken() {
+  if (!DOC) return "";
+  try {
+    const url = new URL(globalThis.location.href);
+    const fromUrl = url.searchParams.get("token");
+    if (fromUrl) {
+      try { localStorage.setItem(TOKEN_KEY, fromUrl); } catch { /* storage unavailable: keep it in memory */ }
+      url.searchParams.delete("token");
+      globalThis.history?.replaceState(globalThis.history.state, "", url.pathname + url.search + url.hash);
+      return fromUrl;
+    }
+  } catch { /* not a browser */ }
+  try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
+}
+const TOKEN = takeToken();
 
 const etags = new Map();
 const cache = new Map();
@@ -32,7 +50,7 @@ export class ApiError extends Error {
 
 export async function get(url, { fresh = false } = {}) {
   const full = withProject(url);
-  const headers = {};
+  const headers = { "X-Factory-Token": TOKEN };
   if (!fresh && etags.has(full)) headers["If-None-Match"] = etags.get(full);
   let res;
   try {
